@@ -72,7 +72,7 @@ Source code and privacy policy: github.com/gengar93/spendidly
 
 ### Contact details
 
-- **Email:** `aditya.janaswamy+tally@gmail.com` (required, shown publicly).
+- **Email:** `aditya.janaswamy+spendidly@gmail.com` (required, shown publicly).
 - **Website:** `https://github.com/gengar93/spendidly`
 - **Phone:** leave blank.
 - **Privacy policy URL** (App content → Privacy policy): `https://gengar93.github.io/spendidly/privacy`
@@ -143,7 +143,7 @@ REVIEW_KEY_HERE
 3. To try voice, tap the mic in an empty chat box, allow the microphone, speak, then tap stop.
 4. To report an AI reply, use the Report action under it.
 
-Questions: aditya.janaswamy+tally@gmail.com
+Questions: aditya.janaswamy+spendidly@gmail.com
 ```
 
 For `REVIEW_KEY_HERE`, create a dedicated key with a small spending limit, for example an OpenRouter key with a credit cap, which works for both chat and voice. Revoke it after review. Don't reuse your own key.
@@ -174,7 +174,7 @@ Expected result: Everyone / PEGI 3 or similar.
 
 ### AI-generated content policy
 
-Play requires apps that generate content with AI to let users report or flag offensive output. Spendidly has a Report action on every AI reply. It opens the user's email app with the reply, the question, the app version and the model name prefilled, addressed to `aditya.janaswamy+tally@gmail.com`; nothing is sent automatically. Mention this in the App access note above and in any policy questionnaire that asks.
+Play requires apps that generate content with AI to let users report or flag offensive output. Spendidly has a Report action on every AI reply. It opens the user's email app with the reply, the question, the app version and the model name prefilled, addressed to `aditya.janaswamy+spendidly@gmail.com`; nothing is sent automatically. Mention this in the App access note above and in any policy questionnaire that asks.
 
 **Check:** Play's policy says reporting should work "without needing to exit the app". Opening an email app does leave Spendidly. If a reviewer objects, an in-app form that sends the report would be needed, but Spendidly has no server to receive it.
 
@@ -199,6 +199,6 @@ Screenshots to capture, in this order. Use **Settings → Load demo data** first
 
 ## Before you submit
 
-- Make sure the in-app support address (`SUPPORT_EMAIL` in the app code) matches `aditya.janaswamy+tally@gmail.com`.
+- Make sure the in-app support address (`SUPPORT_EMAIL` in the app code) matches `aditya.janaswamy+spendidly@gmail.com`.
 - Publish the privacy policy (GitHub Pages from `main`, `/docs`) and confirm `https://gengar93.github.io/spendidly/privacy` loads.
 - New personal developer accounts must run a closed test with at least 12 testers for 14 days before applying for production. **Check** whether this applies to your account.

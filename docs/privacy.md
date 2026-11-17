@@ -92,4 +92,4 @@ If this policy changes, the new version will be posted at this address with a ne
 
 ## Contact
 
-Questions about this policy: [aditya.janaswamy+tally@gmail.com](mailto:aditya.janaswamy+tally@gmail.com)
+Questions about this policy: [aditya.janaswamy+spendidly@gmail.com](mailto:aditya.janaswamy+spendidly@gmail.com)

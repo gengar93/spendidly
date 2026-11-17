@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 
-const val SUPPORT_EMAIL = "aditya.janaswamy+tally@gmail.com"
+const val SUPPORT_EMAIL = "aditya.janaswamy+spendidly@gmail.com"
 
 const val PRIVACY_POLICY_URL = "https://gengar93.github.io/spendidly/privacy"
 
