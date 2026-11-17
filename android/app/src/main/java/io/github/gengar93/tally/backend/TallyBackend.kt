@@ -1,0 +1,117 @@
+package io.github.gengar93.tally.backend
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+
+/** The app's local backend, shared by screens in the current process. */
+class TallyBackend internal constructor(context: Context) {
+    private val app = context.applicationContext
+    private val database = LocalDatabase(app)
+    private val prefs = app.getSharedPreferences("tally", Context.MODE_PRIVATE)
+    val expenses = ExpenseStore(database)
+    val providers = ProviderSettings(database, prefs)
+    private val toolsText by lazy { app.assets.open("expense-tools.json").bufferedReader().use { it.readText() } }
+    private var tools: Pair<AppCurrency, JSONArray>? = null
+    val chat = ChatSession(expenses, providers, ProviderClient()) {
+        val currency = currentCurrency
+        synchronized(this) { tools?.takeIf { it.first == currency }?.second ?: expenseTools(toolsText, currency).also { tools = currency to it } }
+    }
+    val chats = ChatStore(database, chat)
+
+    init {
+        // The first launch fixes the region's currency, so a later region change doesn't relabel amounts.
+        currentCurrency = AppCurrency.fromCode(prefs.getString("currency", null)) ?: AppCurrency.regionDefault().also(::saveCurrency)
+    }
+
+    /** One currency per install. Changing it only relabels existing amounts; nothing is converted. */
+    var currency: AppCurrency
+        get() = currentCurrency
+        set(value) { saveCurrency(value); currentCurrency = value }
+
+    private fun saveCurrency(value: AppCurrency) = prefs.edit().putString("currency", value.code).apply()
+
+    /** The provider the Ask screen uses. Picking a model in Settings sets it. */
+    var activeProvider: ModelProvider
+        get() = prefs.getString("provider", null)?.let { runCatching { ModelProvider.valueOf(it) }.getOrNull() } ?: ModelProvider.ANTHROPIC
+        set(value) { prefs.edit().putString("provider", value.name).apply() }
+
+    /** Tests a pasted key with its provider. The key is not saved; see [ProviderSettings.saveKey]. */
+    suspend fun checkKey(key: String): KeyCheck = withContext(Dispatchers.IO) { io.github.gengar93.tally.backend.checkKey(key) }
+
+    /** The voice model last picked in Settings, as "PROVIDER:id"; null means the first one a saved key can use. */
+    var voiceChoice: String?
+        get() = prefs.getString("voice_model", null)
+        set(value) { prefs.edit().putString("voice_model", value).apply() }
+
+    /** Voice models the saved keys can use, in [voiceModels] order. */
+    suspend fun voiceOptions(): List<VoiceModel> {
+        val usable = ModelProvider.entries.flatMap { providers.configuration(it).voiceModels }.toSet()
+        return voiceModels.filter { it in usable }
+    }
+
+    /** Whether Tally has asked for the microphone before, to tell a permanent denial from a first one. */
+    var micAsked: Boolean
+        get() = prefs.getBoolean("mic_asked", false)
+        set(value) { prefs.edit().putBoolean("mic_asked", value).apply() }
+
+    private val voiceDir = File(app.cacheDir, "voice")
+
+    /** Starts recording to a fresh file in the cache, first removing any clip a crash left behind. */
+    fun startRecording(): VoiceRecorder {
+        voiceDir.mkdirs()
+        voiceDir.listFiles()?.forEach { it.delete() }
+        return VoiceRecorder(File(voiceDir, "voice-${System.currentTimeMillis()}.wav"))
+    }
+
+    /**
+     * Sends a finished recording to [model]'s provider and returns the transcript, with category names and recent
+     * notes as spelling hints. The recording is deleted whatever happens. Throws with a short message on failure.
+     */
+    suspend fun transcribe(model: VoiceModel, audio: File): String = withContext(Dispatchers.IO) {
+        try {
+            val key = providers.credentials(model.provider).apiKey
+            io.github.gengar93.tally.backend.transcribe(model, key, audio, voiceHints())
+        } finally {
+            audio.delete()
+        }
+    }
+
+    /** Category names, then the 50 most recent distinct notes, kept short. */
+    private fun voiceHints(): List<String> {
+        val categories = expenses.getCategories().map { it.name.trim() }
+        val notes = expenses.snapshot().asSequence().mapNotNull { it.note?.trim()?.takeIf { n -> n.isNotEmpty() && n.length <= 60 } }
+            .distinctBy { it.lowercase() }.take(50).toList()
+        return (categories + notes).distinctBy { it.lowercase() }.filter { it.isNotEmpty() && it.length <= 60 }
+    }
+
+    /** Whether chats unused for a week are removed automatically. */
+    var autoDeleteChats: Boolean
+        get() = prefs.getBoolean("auto_delete_chats", false)
+        set(value) { prefs.edit().putBoolean("auto_delete_chats", value).apply() }
+
+    /** Adds two months of fictional expenses ending today, for trying the app out. */
+    suspend fun loadDemoData(): ImportSummary = withContext(Dispatchers.IO) { loadDemoData(database) }
+
+    /** Reads a .tally backup or an expenses CSV without changing anything, so the UI can check its currency first. */
+    suspend fun readImport(input: InputStream): ImportFile = withContext(Dispatchers.IO) { readImportFile(input) }
+
+    suspend fun importData(file: ImportFile): ImportSummary = withContext(Dispatchers.IO) { importBundle(database, file) }
+
+    /** Writes a .tally bundle of expenses and categories that [readImport] reads back. */
+    suspend fun exportBackup(output: OutputStream): ExportSummary = withContext(Dispatchers.IO) { exportBundle(database, output, currency) }
+
+    /** Writes the expenses alone as CSV. */
+    suspend fun exportCsv(output: OutputStream): ExportSummary = withContext(Dispatchers.IO) { exportCsv(database, output) }
+
+    /** The UI calls this after a user confirms the destructive reset. Leaves the app empty but keeps the currency. */
+    suspend fun resetAllData() {
+        chat.reset(database::reset)
+        prefs.edit().clear().apply()
+        saveCurrency(currency)
+    }
+}

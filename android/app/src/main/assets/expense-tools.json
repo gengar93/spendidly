@@ -1,0 +1,417 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "add_expense",
+      "strict": false,
+      "description": "Log one actual expense in {{currency}}.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "{{amount_pattern}}",
+            "description": "{{amount_description}}"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "What the expense was for, using information supplied by the user."
+          },
+          "spent_on": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "Optional spending date in YYYY-MM-DD. Omit when unspecified; the backend supplies today."
+          },
+          "category_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An existing category ID supplied in context. Omit or use null when no category fits."
+          }
+        },
+        "required": [
+          "amount",
+          "description"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_expenses",
+      "strict": false,
+      "description": "Open an interactive transaction or grouped totals table. Returns its ID and initial query metadata only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive earliest spending date, YYYY-MM-DD. Omit or null for no lower bound."
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive latest spending date, YYYY-MM-DD. Omit or null for no upper bound."
+          },
+          "category_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Existing category IDs. Omit or use null for all categories. Use [null] for Uncategorized only."
+          },
+          "min_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive minimum {{currency}} amount, as {{amount_format}}. Zero allowed. Omit or null for no minimum."
+          },
+          "max_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive maximum {{currency}} amount, same format as min_amount. Omit or null for no maximum."
+          },
+          "description_search": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200,
+            "description": "Literal text to find in expense descriptions, ignoring ASCII case. Blank or null means no search."
+          },
+          "group_by": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "month",
+                "category"
+              ]
+            },
+            "maxItems": 2,
+            "description": "Omit or use [] for transactions. Use [\"category\"], [\"month\"], or [\"month\",\"category\"] for spending totals. With both, months contain category subtotals."
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "spent_on",
+              "amount"
+            ],
+            "description": "Sort by spending date (default) or amount."
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "Ascending or descending (default)."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "summarize_expenses",
+      "strict": false,
+      "description": "Return {{currency}} spending metrics overall and optionally by category, month, or both. Each call covers one date range and excludes deleted expenses.",
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "additionalProperties": false,
+        "properties": {
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive earliest spending date, YYYY-MM-DD. Omit or null for no lower bound."
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive latest spending date, YYYY-MM-DD. Omit or null for no upper bound."
+          },
+          "category_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Existing category IDs. Omit or use null for all categories. Use [null] for Uncategorized only."
+          },
+          "min_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive minimum {{currency}} amount, as {{amount_format}}. Zero allowed. Omit or null for no minimum."
+          },
+          "max_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive maximum {{currency}} amount, same format as min_amount. Omit or null for no maximum."
+          },
+          "description_search": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200,
+            "description": "Literal text to find in expense descriptions, ignoring ASCII case. Blank or null means no search."
+          },
+          "group_by": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "month",
+                "category"
+              ]
+            },
+            "maxItems": 2,
+            "description": "Omit or use [] for overall metrics only. With both dimensions, returns flat month–category groups."
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "sum",
+                "count",
+                "avg",
+                "min",
+                "max"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 5,
+            "description": "Default [\"sum\",\"count\"]. avg, min and max operate on individual transactions overall and within each group."
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "month",
+              "category",
+              "sum",
+              "count",
+              "avg",
+              "min",
+              "max"
+            ],
+            "description": "Grouped results only. Sort by a selected dimension or requested metric. Defaults to month if grouped by month, otherwise sum if requested or the first requested metric."
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "Defaults to ascending for dimensions and descending for metrics."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum returned groups, default 24. Overall metrics always cover all matches."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "find_expenses",
+      "strict": false,
+      "description": "Find up to five active expenses and their IDs for a correction or deletion. Returns matching_count and truncated.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive earliest spending date, YYYY-MM-DD. Omit or null for no lower bound."
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive latest spending date, YYYY-MM-DD. Omit or null for no upper bound."
+          },
+          "category_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Existing category IDs. Omit or use null for all categories. Use [null] for Uncategorized only."
+          },
+          "min_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive minimum {{currency}} amount, as {{amount_format}}. Zero allowed. Omit or null for no minimum."
+          },
+          "max_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inclusive maximum {{currency}} amount, same format as min_amount. Omit or null for no maximum."
+          },
+          "description_search": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200,
+            "description": "Literal text to find in expense descriptions, ignoring ASCII case. Blank or null means no search."
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "spent_on",
+              "amount"
+            ],
+            "description": "Sort by spending date (default) or amount."
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "Ascending or descending (default)."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_expense",
+      "strict": false,
+      "description": "Correct one active expense by ID. Omitted fields stay unchanged. {{currency}} only.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expense_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact ID of the identified expense."
+          },
+          "changes": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "amount": {
+                "type": "string",
+                "pattern": "{{amount_pattern}}",
+                "description": "{{amount_description}}"
+              },
+              "spent_on": {
+                "type": "string",
+                "description": "Corrected spending date, YYYY-MM-DD. Omit to keep the existing date."
+              },
+              "category_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Existing category ID, or null for Uncategorized. Omit to keep the existing category."
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 500,
+                "description": "Corrected description, or null to clear it. Omit to keep the existing description."
+              }
+            }
+          }
+        },
+        "required": [
+          "expense_id",
+          "changes"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_expense",
+      "strict": false,
+      "description": "Delete one active expense by ID, immediately. Call only after the user has explicitly confirmed this exact expense in chat.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expense_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact ID of the identified expense."
+          }
+        },
+        "required": [
+          "expense_id"
+        ]
+      }
+    }
+  }
+]
