@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Tally</string>
-    <string name="widget_week_label">Tally week</string>
+    <string name="app_name">Spendidly</string>
+    <string name="widget_week_label">Spendidly week</string>
     <string name="widget_week_description">Today and this week, with buttons to add an expense or ask.</string>
-    <string name="widget_today_label">Tally today</string>
+    <string name="widget_today_label">Spendidly today</string>
     <string name="widget_today_description">Today\'s and this week\'s spend with add and ask buttons.</string>
-    <string name="widget_square_label">Tally square</string>
+    <string name="widget_square_label">Spendidly square</string>
     <string name="widget_square_description">Today\'s spend with add and ask buttons.</string>
 </resources>

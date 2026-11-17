@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Builds a .tally import file for the Android app.
+"""Builds a .spendidly import file for the Android app.
 
-Usage: python3 scripts/build-android-import.py EXPENSES.csv OUTPUT.tally
+Usage: python3 scripts/build-android-import.py EXPENSES.csv OUTPUT.spendidly
+
+OUTPUT is always written with the .spendidly extension.
 
 The file is a zip with expenses.csv (Date,Amount,Category,Note, copied as-is) and
 categories.json, with names and descriptions from GUIDANCE below plus any other
@@ -26,7 +28,7 @@ GUIDANCE = {
     "Transport": "Rides, public transit, and bus fares, like Uber, Ola, Rapido.",
 }
 
-source, output = Path(sys.argv[1]), Path(sys.argv[2])
+source, output = Path(sys.argv[1]), Path(sys.argv[2]).with_suffix(".spendidly")
 
 guidance = GUIDANCE
 

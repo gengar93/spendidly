@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "io.github.gengar93.tally"
+    namespace = "io.github.gengar93.spendidly"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "io.github.gengar93.tally"
+        applicationId = "io.github.gengar93.spendidly"
         minSdk = 26
         targetSdk = 37
         versionCode = 1
@@ -17,17 +17,17 @@ android {
 
     // The Play upload key lives outside the repo. Its path and passwords come from Gradle properties,
     // normally ~/.gradle/gradle.properties; without them, release builds fall back to the debug key.
-    val uploadStoreFile = providers.gradleProperty("TALLY_UPLOAD_STORE_FILE").orNull
-    val hasUploadKey = uploadStoreFile != null && listOf("TALLY_UPLOAD_STORE_PASSWORD", "TALLY_UPLOAD_KEY_ALIAS", "TALLY_UPLOAD_KEY_PASSWORD")
+    val uploadStoreFile = providers.gradleProperty("SPENDIDLY_UPLOAD_STORE_FILE").orNull
+    val hasUploadKey = uploadStoreFile != null && listOf("SPENDIDLY_UPLOAD_STORE_PASSWORD", "SPENDIDLY_UPLOAD_KEY_ALIAS", "SPENDIDLY_UPLOAD_KEY_PASSWORD")
         .all { providers.gradleProperty(it).isPresent }
 
     signingConfigs {
         if (hasUploadKey) {
             create("release") {
                 storeFile = file(uploadStoreFile!!)
-                storePassword = providers.gradleProperty("TALLY_UPLOAD_STORE_PASSWORD").get()
-                keyAlias = providers.gradleProperty("TALLY_UPLOAD_KEY_ALIAS").get()
-                keyPassword = providers.gradleProperty("TALLY_UPLOAD_KEY_PASSWORD").get()
+                storePassword = providers.gradleProperty("SPENDIDLY_UPLOAD_STORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("SPENDIDLY_UPLOAD_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("SPENDIDLY_UPLOAD_KEY_PASSWORD").get()
             }
         }
     }
@@ -41,7 +41,7 @@ android {
             signingConfig = if (hasUploadKey) {
                 signingConfigs.getByName("release")
             } else {
-                logger.warn("Tally: TALLY_UPLOAD_* properties not set; signing the release build with the debug key.")
+                logger.warn("Spendidly: SPENDIDLY_UPLOAD_* properties not set; signing the release build with the debug key.")
                 signingConfigs.getByName("debug")
             }
         }
