@@ -1,10 +1,15 @@
+<!-- "Coin on the line": a coin, a pencil and the line it has just written. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:strokeColor="#FFFFFF" android:strokeWidth="6"
-        android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M37.5 33V75M48.5 33V75M59.5 33V75M70.5 33V75" />
-    <path android:strokeColor="#B8F5D6" android:strokeWidth="6"
-        android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M28 66L80 42" />
+    <path android:fillColor="#FFC845"
+        android:pathData="M18,30 A30,30 0 1,0 78,30 A30,30 0 1,0 18,30Z" />
+    <path android:strokeColor="#D99A1A" android:strokeWidth="4.5"
+        android:pathData="M27.6,30 A20.4,20.4 0 1,0 68.4,30 A20.4,20.4 0 1,0 27.6,30Z" />
+    <path android:fillColor="#FF7F5C"
+        android:pathData="M81.86,65.03 L124.29,22.61 A7,7 0 0,0 114.39,12.71 L71.97,55.14Z" />
+    <path android:fillColor="#FFC845"
+        android:pathData="M66,71 L80.14,66.76 L70.24,56.86Z" />
+    <path android:fillColor="#FF7F5C"
+        android:pathData="M31.5,68 H58 A3,3 0 0,1 61,71 A3,3 0 0,1 58,74 H31.5 A3,3 0 0,1 28.5,71 A3,3 0 0,1 31.5,68Z" />
 </vector>

@@ -182,7 +182,7 @@ Play requires apps that generate content with AI to let users report or flag off
 
 | Asset | Spec | Plan |
 |---|---|---|
-| App icon | 512 × 512 px, 32-bit PNG with alpha, max 1 MB. Full square; Play applies the rounded mask. | Export from the adaptive icon (`res/mipmap-anydpi/ic_launcher.xml`, foreground over background). In Android Studio: **New → Image Asset → Launcher Icons (Adaptive and Legacy)**, point it at the existing foreground and background drawables, and it writes `ic_launcher-playstore.png` at 512 × 512. Discard the other files it generates. |
+| App icon | 512 × 512 px, 32-bit PNG with alpha, max 1 MB. Full square; Play applies the rounded mask. | Ready: `android/app/src/main/ic_launcher-playstore.png`, rendered from the adaptive icon (navy background, gold coin, coral pencil and line). Re-export it if the drawables change. |
 | Feature graphic | 1024 × 500 px, JPEG or 24-bit PNG (no alpha), max 15 MB. | The icon and "Spendidly" on the left, a phone showing Summary on the right. Keep important content away from the edges, since it can be cropped. |
 | Phone screenshots | 2 to 8. PNG or JPEG, max 8 MB each, 16:9 or 9:16, each side 320 to 3,840 px. Use at least 4 at 1080 px or more to qualify for promotion. | See the list below. |
 
