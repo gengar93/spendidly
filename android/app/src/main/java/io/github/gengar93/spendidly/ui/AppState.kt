@@ -529,7 +529,7 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         }
     }
 
-    /** Stops recording and sends the transcript as the next question. Pieces cut at pauses are already being transcribed. */
+    /** Stops recording and sends the transcript as the next question. A head start taken at a pause may already be done. */
     fun stopVoice() {
         val v = voice ?: return
         if (voiceStage != VoiceStage.Recording) return
@@ -537,7 +537,7 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         voiceStage = VoiceStage.Transcribing
         voiceJob = scope.launch {
             val stopped = SystemClock.elapsedRealtime()
-            // The clip and its pieces are deleted whatever happens, including a cancel while they're being sent.
+            // The clip and any head-start copy are deleted whatever happens, including a cancel while they're being sent.
             try {
                 v.stop()
                 val r = v.recorder
@@ -561,7 +561,7 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
                     return@launch
                 }
                 val now = SystemClock.elapsedRealtime()
-                voiceTiming = now to "${r.millis} ms clip, ${if (v.whole) "whole clip" else "${r.pieces} pieces"}, stop to transcript ${now - stopped} ms"
+                voiceTiming = now to "${r.millis} ms clip, ${v.headStart}, stop to transcript ${now - stopped} ms"
                 voiceStage = VoiceStage.Idle
                 ask(text)
             } finally {
