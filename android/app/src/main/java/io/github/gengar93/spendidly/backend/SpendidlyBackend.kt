@@ -1,6 +1,9 @@
 package io.github.gengar93.spendidly.backend
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -26,6 +29,7 @@ class SpendidlyBackend internal constructor(context: Context) {
     init {
         // The first launch fixes the region's currency, so a later region change doesn't relabel amounts.
         currentCurrency = AppCurrency.fromCode(prefs.getString("currency", null)) ?: AppCurrency.regionDefault().also(::saveCurrency)
+        currentColours = ColourSetting(prefs.getString("colours", null), prefs.getBoolean("vivid_colours", true))
     }
 
     /** One currency per install. Changing it only relabels existing amounts; nothing is converted. */
@@ -34,6 +38,14 @@ class SpendidlyBackend internal constructor(context: Context) {
         set(value) { saveCurrency(value); currentCurrency = value }
 
     private fun saveCurrency(value: AppCurrency) = prefs.edit().putString("currency", value.code).apply()
+
+    /** The app's and widgets' colours. Applies at once; see [ColourSetting]. */
+    var colours: ColourSetting
+        get() = currentColours
+        set(value) { saveColours(value); currentColours = value }
+
+    private fun saveColours(value: ColourSetting) =
+        prefs.edit().putString("colours", value.palette).putBoolean("vivid_colours", value.vivid).apply()
 
     /** The provider the Ask screen uses. Picking a model in Settings sets it. */
     var activeProvider: ModelProvider
@@ -108,10 +120,16 @@ class SpendidlyBackend internal constructor(context: Context) {
     /** Writes the expenses alone as CSV. */
     suspend fun exportCsv(output: OutputStream): ExportSummary = withContext(Dispatchers.IO) { exportCsv(database, output) }
 
-    /** The UI calls this after a user confirms the destructive reset. Leaves the app empty but keeps the currency. */
+    /** The UI calls this after a user confirms the destructive reset. Leaves the app empty but keeps the currency and colours. */
     suspend fun resetAllData() {
         chat.reset(database::reset)
         prefs.edit().clear().apply()
         saveCurrency(currency)
+        saveColours(colours)
     }
 }
+
+/** A curated palette's id, or null to follow the wallpaper. [vivid] applies only when following the wallpaper. */
+data class ColourSetting(val palette: String? = null, val vivid: Boolean = true)
+
+internal var currentColours by mutableStateOf(ColourSetting())

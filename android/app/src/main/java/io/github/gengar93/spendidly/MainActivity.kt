@@ -63,9 +63,9 @@ class MainActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
                 val state = remember { AppState(backend, scope) }
                 LaunchedEffect(Unit) { state.refresh() }
-                // Widgets show a mic instead of the chat button once a saved key supports voice.
+                // Widgets show a mic instead of the chat button once a saved key supports voice, and follow the colour setting.
                 val voiceReady = state.voiceModel != null
-                LaunchedEffect(state.expenses, io.github.gengar93.spendidly.ui.currency, voiceReady) { if (state.loaded) io.github.gengar93.spendidly.widget.updateWidgets(applicationContext) }
+                LaunchedEffect(state.expenses, io.github.gengar93.spendidly.ui.currency, io.github.gengar93.spendidly.ui.colours, voiceReady) { if (state.loaded) io.github.gengar93.spendidly.widget.updateWidgets(applicationContext) }
                 App(state, openRequest.value) { openRequest.value = null }
             }
         }

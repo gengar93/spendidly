@@ -1,6 +1,5 @@
 package io.github.gengar93.spendidly.ui
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -9,8 +8,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -98,31 +95,14 @@ fun roleColors(role: Role): Pair<Color, Color> {
     }
 }
 
-/** The wallpaper's main colour on Android 12+, else the system accent, else Spendidly blue. */
-internal fun wallpaperSeed(context: android.content.Context): Color {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val colors = runCatching {
-            android.app.WallpaperManager.getInstance(context).getWallpaperColors(android.app.WallpaperManager.FLAG_SYSTEM)
-        }.getOrNull()
-        colors?.primaryColor?.let { return Color(it.toArgb()) }
-        return dynamicLightColorScheme(context).primary
-    }
-    return Color(0xFF3F5F91)
-}
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SpendidlyTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val context = LocalContext.current
-    // Follow the wallpaper's hue, but build the scheme in Material's Vibrant style: deeper and more
-    // saturated than the system's own (muted) dynamic scheme.
-    val seed = remember { wallpaperSeed(context) }
-    val scheme = remember(seed, dark) {
-        com.materialkolor.dynamicColorScheme(
-            seedColor = seed, isDark = dark, isAmoled = false, style = com.materialkolor.PaletteStyle.Vibrant,
-        )
-    }
+    // Applies live: changing the setting in Settings recomposes from here.
+    val setting = colours
+    val scheme = remember(setting, dark) { appColorScheme(context, setting, dark) }
     val base = Typography()
     val typography = Typography(
         bodyLarge = base.bodyLarge.copy(fontFamily = TextFont), bodyMedium = base.bodyMedium.copy(fontFamily = TextFont),

@@ -21,21 +21,27 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -84,6 +90,7 @@ import io.github.gengar93.spendidly.PRIVACY_POLICY_URL
 import io.github.gengar93.spendidly.appVersion
 import io.github.gengar93.spendidly.backend.AppCurrency
 import io.github.gengar93.spendidly.openPrivacyPolicy
+import io.github.gengar93.spendidly.backend.ColourSetting
 import io.github.gengar93.spendidly.backend.Category
 import io.github.gengar93.spendidly.backend.ModelProvider
 import io.github.gengar93.spendidly.backend.detectProvider
@@ -132,6 +139,35 @@ fun SettingsScreen(state: AppState, contentPadding: PaddingValues) {
                     Text(currency.displayName, style = Type.small, color = c.onSurfaceVariant)
                 }
             }
+        }
+        item {
+            Section("Colours")
+            val setting = colours
+            val auto = setting.curated == null
+            val dark = LocalPalette.current.dark
+            // Each option previewed in the current light or dark mode; Auto shows the wallpaper with the vivid choice.
+            val previews = remember(dark, setting.vivid) {
+                listOf(Triple("Auto", null as String?, appColorScheme(context, ColourSetting(null, setting.vivid), dark))) +
+                    colourPalettes.map { Triple(it.name, it.id, appColorScheme(context, ColourSetting(it.id), dark)) }
+            }
+            SegmentedColumn {
+                SegmentedItem(0, if (auto) 2 else 1, verticalPadding = 14.dp) {
+                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()).selectableGroup()) {
+                        previews.forEach { (name, id, scheme) ->
+                            val on = if (id == null) auto else setting.curated?.id == id
+                            Swatch(name, scheme, on) { state.chooseColours(setting.copy(palette = id)) }
+                        }
+                    }
+                }
+                if (auto) SegmentedItem(1, 2, onClick = { state.chooseColours(setting.copy(vivid = !setting.vivid)) }) {
+                    Label("Vivid colours", "Brighter than your phone's own colours", Modifier.weight(1f))
+                    androidx.compose.material3.Switch(checked = setting.vivid, onCheckedChange = { state.chooseColours(setting.copy(vivid = it)) })
+                }
+            }
+            Text(
+                "Auto takes its colours from your wallpaper. Widgets use the same colours.",
+                style = Type.tiny, color = c.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 8.dp),
+            )
         }
         item {
             Section("Ask")
@@ -441,6 +477,34 @@ private val AppCurrency.sample: Long get() = if (decimals > 0) 1_234_50L else 1_
 
 /** "Euro (EUR)"; toman has no ISO code to show. */
 private val AppCurrency.title: String get() = if (this == AppCurrency.IRT) displayName else "$displayName ($code)"
+
+/** A palette option: a circle split into its primary colour and its secondary and tertiary containers, with its name below. */
+@Composable
+private fun Swatch(name: String, scheme: ColorScheme, selected: Boolean, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Column(
+        Modifier.width(64.dp).clip(RoundedCornerShape(16.dp))
+            .selectable(selected, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick).padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            Modifier.size(52.dp).border(if (selected) 3.dp else 1.dp, if (selected) c.primary else c.outlineVariant, CircleShape)
+                .padding(if (selected) 6.dp else 0.dp).clip(CircleShape),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth().background(scheme.primary))
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    Box(Modifier.weight(1f).fillMaxHeight().background(scheme.secondaryContainer))
+                    Box(Modifier.weight(1f).fillMaxHeight().background(scheme.tertiaryContainer))
+                }
+            }
+        }
+        Text(
+            name, style = Type.tiny.copy(fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal),
+            color = if (selected) c.onSurface else c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 @Composable
 private fun Section(title: String) {

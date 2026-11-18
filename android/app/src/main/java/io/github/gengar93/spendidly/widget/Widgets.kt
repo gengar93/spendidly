@@ -50,9 +50,7 @@ import io.github.gengar93.spendidly.R
 import io.github.gengar93.spendidly.ui.isLarge
 import io.github.gengar93.spendidly.ui.largeThreshold
 import io.github.gengar93.spendidly.ui.wholeRupees
-import io.github.gengar93.spendidly.ui.wallpaperSeed
-import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamicColorScheme
+import io.github.gengar93.spendidly.ui.appColorScheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -82,13 +80,10 @@ private suspend fun loadData(context: Context): WidgetData = withContext(Dispatc
     WidgetData(days[today.dayOfWeek.value - 1], days.sum(), days, large, today.dayOfWeek.value - 1, voice)
 }
 
-/** Same vibrant, wallpaper-seeded scheme as the app. */
-private fun colors(context: Context): androidx.glance.color.ColorProviders {
-    val seed = wallpaperSeed(context)
-    return ColorProviders(
-        light = dynamicColorScheme(seedColor = seed, isDark = false, isAmoled = false, style = PaletteStyle.Vibrant),
-        dark = dynamicColorScheme(seedColor = seed, isDark = true, isAmoled = false, style = PaletteStyle.Vibrant),
-    )
+/** Same colours as the app, from the colour setting. */
+private fun widgetColors(context: Context): androidx.glance.color.ColorProviders {
+    val setting = (context.applicationContext as SpendidlyApplication).backend.colours
+    return ColorProviders(light = appColorScheme(context, setting, dark = false), dark = appColorScheme(context, setting, dark = true))
 }
 
 private fun open(context: Context, what: String): Action = actionStartActivity(
@@ -104,18 +99,19 @@ private fun open(context: Context, what: String): Action = actionStartActivity(
  */
 private val refreshes = MutableStateFlow(0)
 
-/** Base for the three widgets: loads totals and colours, then draws [Content], reloading on each [updateWidgets]. */
+/** Base for the three widgets: loads totals and colours, then draws [Content], reloading both on each [updateWidgets]. */
 abstract class SpendidlyWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val loadedAt = refreshes.value
         val first = loadData(context)
-        val colors = colors(context)
+        val firstColors = widgetColors(context)
         provideContent {
             val refresh by refreshes.collectAsState()
             var data by remember { mutableStateOf(first) }
-            LaunchedEffect(refresh) { if (refresh != loadedAt) data = loadData(context) }
+            var colors by remember { mutableStateOf(firstColors) }
+            LaunchedEffect(refresh) { if (refresh != loadedAt) { data = loadData(context); colors = widgetColors(context) } }
             GlanceTheme(colors = colors) { Content(context, data) }
         }
     }

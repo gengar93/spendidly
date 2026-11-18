@@ -272,6 +272,11 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         show("Amounts now show in ${value.displayName}")
     }
 
+    /** Switches the app's and widgets' colours; the theme recomposes and MainActivity redraws the widgets. */
+    fun chooseColours(value: io.github.gengar93.spendidly.backend.ColourSetting) {
+        if (value != backend.colours) backend.colours = value
+    }
+
     /** A backup in another currency, waiting for the user to confirm importing it as it is. */
     var pendingImport by mutableStateOf<ImportFile?>(null); private set
 
