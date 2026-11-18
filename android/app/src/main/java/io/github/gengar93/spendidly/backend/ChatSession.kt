@@ -21,7 +21,20 @@ data class ExpenseChange(val action: ExpenseAction, val expense: JSONObject)
 data class ChatFailure(val code: String, val message: String)
 data class DeletionConfirmation(val token: String, val expense: JSONObject)
 
-/** Changes and tables are cumulative for the current turn, including after a deletion decision. */
+/** Shown, and kept in the model history, when a turn that already changed expenses ends without a reply. */
+const val UNFINISHED_REPLY = "The reply didn't finish."
+
+/**
+ * Reported right after a write succeeds, while the turn goes on. [changes] are the turn's changes so far, one per
+ * expense. [history] is the conversation as it would stand if the turn ended here, so a chat saved now stays valid.
+ */
+class ChatProgress internal constructor(
+    val changes: List<ExpenseChange>,
+    internal val history: List<ModelMessage>,
+    internal val route: Pair<ModelProvider, String>,
+)
+
+/** Changes (one per expense) and tables are cumulative for the current turn, including after a deletion decision. */
 data class ChatOutcome(
     val reply: String? = null,
     val failure: ChatFailure? = null,
@@ -43,7 +56,12 @@ class ChatSession internal constructor(
     private var route: Pair<ModelProvider, String>? = null
     private var pending: PendingDeletion? = null
 
-    suspend fun send(provider: ModelProvider, text: String): ChatOutcome = serialized {
+    /** [onProgress] runs after each successful add, update or delete, before the turn continues. */
+    suspend fun send(
+        provider: ModelProvider,
+        text: String,
+        onProgress: suspend (ChatProgress) -> Unit = {},
+    ): ChatOutcome = serialized {
         if (pending != null) return@serialized unsuccessful("CONFIRMATION_PENDING", "Resolve the pending deletion first.")
         val input = text.trim()
         if (input.isEmpty() || input.length > 20_000) {
@@ -61,7 +79,7 @@ class ChatSession internal constructor(
         if (route != null && route != selectedRoute) {
             return@serialized unsuccessful("PROVIDER_CHANGED", "Start a new chat to switch providers or models.")
         }
-        val turn = Turn(input, (history + ModelMessage.User(input)).toMutableList(), selectedRoute)
+        val turn = Turn(input, (history + ModelMessage.User(input)).toMutableList(), selectedRoute, onProgress)
         runTurn(turn, credentials)
     }
 
@@ -128,14 +146,14 @@ class ChatSession internal constructor(
         try {
             return withTimeout(120_000L) { continueTurn(turn, credentials) }
         } catch (_: TimeoutCancellationException) {
-            return stop(turn, ChatFailure("TURN_TIMEOUT", "The turn took too long to complete."))
+            return stop(turn, replyFailure(turn, "TURN_TIMEOUT", "The turn took too long to complete."))
         } catch (error: CancellationException) {
-            stop(turn, ChatFailure("TURN_CANCELLED", "The turn was interrupted."))
+            stop(turn, replyFailure(turn, "TURN_CANCELLED", "The turn was interrupted."))
             throw error
         } catch (error: BackendProblem) {
-            return stop(turn, ChatFailure(error.code, error.message.orEmpty()))
+            return stop(turn, replyFailure(turn, error.code, error.message.orEmpty()))
         } catch (_: Exception) {
-            return stop(turn, ChatFailure("TURN_FAILED", "Spendidly could not complete this turn."))
+            return stop(turn, replyFailure(turn, "TURN_FAILED", "Spendidly could not complete this turn."))
         }
     }
 
@@ -148,7 +166,13 @@ class ChatSession internal constructor(
                 val reply = client.reply(credentials, system, tools(), turn.messages)
                 currentCoroutineContext().ensureActive()
                 if (reply.calls.isEmpty()) {
-                    if (reply.text.isBlank()) fail("EMPTY_MODEL_REPLY", "The model returned an empty reply.")
+                    if (reply.text.isBlank()) {
+                        if (turn.changes.isEmpty()) fail("EMPTY_MODEL_REPLY", "The model returned an empty reply.")
+                        // The changes are the answer. Providers reject empty assistant turns, so history gets a placeholder.
+                        turn.messages.add(ModelMessage.LocalReply("Done."))
+                        commit(turn)
+                        return outcome(turn)
+                    }
                     turn.messages.add(reply)
                     commit(turn)
                     return outcome(turn, reply = reply.text)
@@ -163,7 +187,7 @@ class ChatSession internal constructor(
                 finishBatch(turn, batch)
                 // Out of searches is fine: the model can still present candidates; validateBatch blocks further searches.
                 if (turn.rounds >= toolRoundsLimit) {
-                    return stop(turn, ChatFailure("ROUND_LIMIT", "This turn reached its tool limit."))
+                    return stop(turn, replyFailure(turn, "ROUND_LIMIT", "This turn reached its tool limit."))
                 }
                 continue
             }
@@ -211,17 +235,26 @@ class ChatSession internal constructor(
         turn.callIds.addAll(calls.map { it.id })
     }
 
-    private fun record(turn: Turn, batch: Batch, call: ToolCall, result: JSONObject) {
+    private suspend fun record(turn: Turn, batch: Batch, call: ToolCall, result: JSONObject) {
         val ok = result.optBoolean("ok")
-        if (ok) {
-            when (call.name) {
-                "add_expense" -> turn.changes.add(ExpenseChange(ExpenseAction.ADDED, result.getJSONObject("expense")))
-                "update_expense" -> turn.changes.add(ExpenseChange(ExpenseAction.UPDATED, result.getJSONObject("expense")))
-                "delete_expense" -> turn.changes.add(ExpenseChange(ExpenseAction.DELETED, result.getJSONObject("deleted_expense")))
-                "list_expenses" -> turn.tables.add(result)
-            }
+        val change = if (!ok) null else when (call.name) {
+            "add_expense" -> ExpenseChange(ExpenseAction.ADDED, result.getJSONObject("expense"))
+            "update_expense" -> ExpenseChange(ExpenseAction.UPDATED, result.getJSONObject("expense"))
+            "delete_expense" -> ExpenseChange(ExpenseAction.DELETED, result.getJSONObject("deleted_expense"))
+            else -> null
         }
+        if (ok && call.name == "list_expenses") turn.tables.add(result)
         batch.results.add(ToolResult(call.id, result.toString(), failed = !ok))
+        if (change == null) return
+        turn.changes.add(change)
+        val progress = ChatProgress(presented(turn.changes), closed(turn, batch, UNFINISHED_REPLY), turn.route)
+        try {
+            turn.onProgress(progress)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Showing or saving early is best effort; the turn's outcome still carries the change.
+        }
     }
 
     private fun finishBatch(turn: Turn, batch: Batch) {
@@ -229,18 +262,32 @@ class ChatSession internal constructor(
         turn.batch = null
     }
 
-    private fun stop(turn: Turn, problem: ChatFailure): ChatOutcome {
-        turn.batch?.let { batch ->
+    /** The turn's messages with [batch] closed (calls not yet run marked as skipped) and [note] as the last reply. */
+    private fun closed(turn: Turn, batch: Batch?, note: String): List<ModelMessage> {
+        val messages = turn.messages.toMutableList()
+        if (batch != null) {
             val skipped = failure("NOT_EXECUTED", "The turn stopped before this tool ran.").toString()
-            for (call in batch.calls.drop(batch.results.size)) batch.results.add(ToolResult(call.id, skipped, failed = true))
-            finishBatch(turn, batch)
+            val results = batch.results + batch.calls.drop(batch.results.size).map { ToolResult(it.id, skipped, failed = true) }
+            messages.add(ModelMessage.Results(results))
         }
+        messages.add(ModelMessage.LocalReply(note))
+        return messages
+    }
+
+    private fun stop(turn: Turn, problem: ChatFailure): ChatOutcome {
         if (turn.rounds > 0) {
-            turn.messages.add(ModelMessage.LocalReply(problem.message))
+            val messages = closed(turn, turn.batch, problem.message)
+            turn.batch = null
+            turn.messages.clear()
+            turn.messages.addAll(messages)
             commit(turn)
         }
         return outcome(turn, failure = problem)
     }
+
+    /** Once expenses changed, a later failure is only about the reply; the changes stand. */
+    private fun replyFailure(turn: Turn, code: String, message: String) =
+        ChatFailure(code, if (turn.changes.isEmpty()) message else "$UNFINISHED_REPLY $message")
 
     private fun commit(turn: Turn) {
         history.clear()
@@ -255,12 +302,17 @@ class ChatSession internal constructor(
         deletion: DeletionConfirmation? = null,
     ) = ChatOutcome(
         reply, failure,
-        turn.changes.map { it.copy(expense = JSONObject(it.expense.toString())) },
+        presented(turn.changes),
         turn.tables.map { JSONObject(it.toString()) },
         deletion,
     )
 
-    private class Turn(val source: String, val messages: MutableList<ModelMessage>, val route: Pair<ModelProvider, String>) {
+    private class Turn(
+        val source: String,
+        val messages: MutableList<ModelMessage>,
+        val route: Pair<ModelProvider, String>,
+        val onProgress: suspend (ChatProgress) -> Unit,
+    ) {
         val changes = mutableListOf<ExpenseChange>()
         val tables = mutableListOf<JSONObject>()
         val callIds = mutableSetOf<String>()
@@ -276,6 +328,21 @@ class ChatSession internal constructor(
     }
 
     private data class PendingDeletion(val token: String, val expense: Expense, val turn: Turn)
+}
+
+/**
+ * One change per expense, in the order first touched: a later update or delete of the same expense replaces the
+ * earlier entry. An expense added and then edited in the same turn still reads as added. Expenses are copied.
+ */
+private fun presented(changes: List<ExpenseChange>): List<ExpenseChange> {
+    val byExpense = LinkedHashMap<Any, ExpenseChange>()
+    changes.forEachIndexed { i, change ->
+        val key: Any = change.expense.optString("id").ifEmpty { i }
+        val previous = byExpense[key]
+        val action = if (previous?.action == ExpenseAction.ADDED && change.action == ExpenseAction.UPDATED) ExpenseAction.ADDED else change.action
+        byExpense[key] = ExpenseChange(action, JSONObject(change.expense.toString()))
+    }
+    return byExpense.values.toList()
 }
 
 private fun unsuccessful(code: String, message: String) = ChatOutcome(failure = ChatFailure(code, message))

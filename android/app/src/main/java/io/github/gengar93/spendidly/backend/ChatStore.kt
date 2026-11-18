@@ -31,7 +31,10 @@ class ChatStore internal constructor(
             rows("SELECT id, title, updated_at, transcript FROM chats ORDER BY updated_at DESC") { row ->
                 val turns = JSONArray(row.getText(3))
                 val last = if (turns.length() == 0) null else turns.getJSONObject(turns.length() - 1)
-                val preview = last?.let { it.optString("reply").ifEmpty { it.optString("failure") } }.orEmpty()
+                val preview = last?.let { t ->
+                    (t.value("reply") as? String).orEmpty().ifEmpty { (t.value("failure") as? String).orEmpty() }
+                        .ifEmpty { t.optJSONArray("changes")?.optString(0).orEmpty() }
+                }.orEmpty()
                 ChatSummary(row.getText(0), row.getText(1), row.getText(2), io.github.gengar93.spendidly.ui.plainPreview(preview))
             }
         }
@@ -59,6 +62,19 @@ class ChatStore internal constructor(
     suspend fun save(id: String, turns: List<ChatTurn>) {
         if (turns.isEmpty()) return
         val (history, route) = session.export()
+        write(id, turns, history, route)
+    }
+
+    /**
+     * Saves a chat while a turn is still running, with the history from [progress]. It doesn't wait for the live
+     * session, which the running turn holds. The final [save] replaces it when the turn ends.
+     */
+    suspend fun saveProgress(id: String, turns: List<ChatTurn>, progress: ChatProgress) {
+        if (turns.isEmpty()) return
+        write(id, turns, progress.history, progress.route)
+    }
+
+    private suspend fun write(id: String, turns: List<ChatTurn>, history: List<ModelMessage>, route: Pair<ModelProvider, String>?) {
         withContext(Dispatchers.IO) {
             val now = timestamp(clock)
             val title = turns.first().question.trim().take(80)

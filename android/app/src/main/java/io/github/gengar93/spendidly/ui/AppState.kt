@@ -11,10 +11,13 @@ import androidx.compose.runtime.setValue
 import io.github.gengar93.spendidly.backend.AppCurrency
 import io.github.gengar93.spendidly.backend.Category
 import io.github.gengar93.spendidly.backend.ChatOutcome
+import io.github.gengar93.spendidly.backend.ChatProgress
 import io.github.gengar93.spendidly.backend.ChatSummary
 import io.github.gengar93.spendidly.backend.ChatTurn
 import io.github.gengar93.spendidly.backend.CuratedModel
+import io.github.gengar93.spendidly.backend.ExpenseChange
 import io.github.gengar93.spendidly.backend.ExpenseItem
+import io.github.gengar93.spendidly.backend.UNFINISHED_REPLY
 import io.github.gengar93.spendidly.backend.ImportFile
 import io.github.gengar93.spendidly.backend.KeyCheck
 import io.github.gengar93.spendidly.backend.SpendidlyBackend
@@ -427,7 +430,7 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         scope.launch {
             if (fresh) backend.chats.startNew()
             val timing = voiceTiming.also { voiceTiming = null }
-            val outcome = runCatching { backend.chat.send(provider, text) }.getOrElse { ChatOutcome(failure = io.github.gengar93.spendidly.backend.ChatFailure("FAILED", it.message ?: "The request failed.")) }
+            val outcome = runCatching { backend.chat.send(provider, text) { progress(entry, it) } }.getOrElse { ChatOutcome(failure = io.github.gengar93.spendidly.backend.ChatFailure("FAILED", it.message ?: "The request failed.")) }
             timing?.let { (at, line) -> Log.d("SpendidlyVoice", "$line, transcript to reply ${SystemClock.elapsedRealtime() - at} ms") }
             apply(entry, outcome)
         }
@@ -441,16 +444,40 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         scope.launch { apply(entry, backend.chat.resolveDeletion(token, approved)) }
     }
 
+    /**
+     * Runs mid-turn after each write: shows the chips under "Working it out" and saves the chat with this turn as
+     * unfinished, so it survives the app being killed. The turn waits for this, so it never races the final [apply].
+     */
+    private suspend fun progress(entry: AskEntry, progress: ChatProgress): Unit = withContext<Unit>(Dispatchers.Main) {
+        if (!entry.pending) return@withContext
+        entry.changes = progress.changes.map(::chip)
+        val (items, cats) = withContext(Dispatchers.IO) { backend.expenses.snapshot() to backend.expenses.getCategories() }
+        setData(items, cats)
+        val id = chatId ?: return@withContext
+        if (entry !in asks) return@withContext
+        val turns = asks.filter { it === entry || !it.pending }.map {
+            if (it === entry) ChatTurn(it.question, null, UNFINISHED_REPLY, it.changes, null)
+            else ChatTurn(it.question, it.reply, it.failure, it.changes, it.filters)
+        }
+        runCatching {
+            backend.chats.saveProgress(id, turns, progress)
+            chats = backend.chats.list()
+        }
+    }
+
+    private fun chip(change: ExpenseChange): String {
+        val e = change.expense
+        val verb = change.action.name.lowercase().replaceFirstChar { it.uppercase() }
+        return "$verb ${rupees(decimalPaise(e.optString("amount")) ?: 0)} · ${e.optString("category_name")}" +
+            (e.optString("description").takeIf { it.isNotEmpty() && it != "null" }?.let { " · $it" } ?: "")
+    }
+
     private suspend fun apply(entry: AskEntry, outcome: ChatOutcome) {
         entry.reply = outcome.reply
         entry.failure = outcome.failure?.message
         entry.deletion = outcome.deletion?.let { it.token to it.expense }
-        entry.changes = outcome.changes.map { change ->
-            val e = change.expense
-            val verb = change.action.name.lowercase().replaceFirstChar { it.uppercase() }
-            "$verb ${rupees(decimalPaise(e.optString("amount")) ?: 0)} · ${e.optString("category_name")}" +
-                (e.optString("description").takeIf { it.isNotEmpty() && it != "null" }?.let { " · $it" } ?: "")
-        }
+        // Outcomes carry all of the turn's changes; only a send that failed outright has none, so keep early chips then.
+        if (outcome.changes.isNotEmpty() || entry.changes.isEmpty()) entry.changes = outcome.changes.map(::chip)
         if (outcome.changes.isNotEmpty()) {
             val (items, cats) = withContext(Dispatchers.IO) { backend.expenses.snapshot() to backend.expenses.getCategories() }
             setData(items, cats)

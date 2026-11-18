@@ -223,7 +223,7 @@ fun ChatView(state: AppState) {
     }
     BackHandler { state.closeChat() }
     BackHandler(enabled = state.voiceStage != VoiceStage.Idle) { state.cancelVoice() }
-    LaunchedEffect(state.asks.size, state.asks.lastOrNull()?.pending) {
+    LaunchedEffect(state.asks.size, state.asks.lastOrNull()?.pending, state.asks.lastOrNull()?.changes?.size) {
         if (state.asks.isNotEmpty()) list.animateScrollToItem(state.asks.size)
     }
     Column(Modifier.fillMaxSize().background(c.surface).clickableNoRipple {}.statusBarsPadding().imePadding().navigationBarsPadding()) {
