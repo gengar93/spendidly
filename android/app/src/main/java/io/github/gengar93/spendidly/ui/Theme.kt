@@ -30,6 +30,9 @@ import io.github.gengar93.spendidly.R
 data class Palette(
     val bg: Color, val surface: Color, val sunk: Color, val ink: Color, val sub: Color, val line: Color,
     val accent: Color, val accentInk: Color, val accentSoft: Color, val danger: Color, val scrim: Color, val dark: Boolean,
+    /** Fixed, not from the scheme: wallpaper or palette colours can make "primary" read as anything, even red. */
+    val good: Color = if (dark) Color(0xFF7DD891) else Color(0xFF1E6B34),
+    val warn: Color = if (dark) Color(0xFFF2BD5C) else Color(0xFF8A5100),
 )
 
 private fun ColorScheme.palette(dark: Boolean) = Palette(

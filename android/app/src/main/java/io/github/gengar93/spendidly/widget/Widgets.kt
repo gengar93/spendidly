@@ -66,7 +66,7 @@ const val OPEN_CHAT = "chat"
 const val OPEN_VOICE = "voice"
 
 /** [voice] is true when a saved key supports voice, so the chat button becomes a mic. */
-private class WidgetData(val today: Long, val week: Long, val days: List<Long>, val largeDays: Set<Int>, val todayIndex: Int, val voice: Boolean)
+private data class WidgetData(val today: Long, val week: Long, val days: List<Long>, val largeDays: Set<Int>, val todayIndex: Int, val voice: Boolean)
 
 private suspend fun loadData(context: Context): WidgetData = withContext(Dispatchers.IO) {
     val backend = (context.applicationContext as SpendidlyApplication).backend
@@ -76,8 +76,17 @@ private suspend fun loadData(context: Context): WidgetData = withContext(Dispatc
     val monday = today.with(DayOfWeek.MONDAY)
     val days = (0..6).map { i -> items.filter { it.date == monday.plusDays(i.toLong()) }.sumOf { it.amountPaise } }
     val large = (0..6).filter { i -> items.any { it.date == monday.plusDays(i.toLong()) && isLarge(it.amountPaise, threshold) } }.toSet()
-    val voice = runCatching { backend.voiceOptions().isNotEmpty() }.getOrDefault(false)
+    val voice = hasVoice(context)
     WidgetData(days[today.dayOfWeek.value - 1], days.sum(), days, large, today.dayOfWeek.value - 1, voice)
+}
+
+/** Whether a saved key can use a voice model, so Ask can start by voice. */
+internal suspend fun hasVoice(context: Context): Boolean =
+    runCatching { (context.applicationContext as SpendidlyApplication).backend.voiceOptions().isNotEmpty() }.getOrDefault(false)
+
+/** Plausible figures for the picker previews: a Thursday, after a big Tuesday. */
+private val sampleData = listOf(42_000L, 125_000L, 18_500L, 64_000L, 0L, 0L, 0L).let { days ->
+    WidgetData(today = days[3], week = days.sum(), days = days, largeDays = setOf(1), todayIndex = 3, voice = false)
 }
 
 /** Same colours as the app, from the colour setting. */
@@ -114,6 +123,14 @@ abstract class SpendidlyWidget : GlanceAppWidget() {
             LaunchedEffect(refresh) { if (refresh != loadedAt) { data = loadData(context); colors = widgetColors(context) } }
             GlanceTheme(colors = colors) { Content(context, data) }
         }
+    }
+
+    /** The widget picker's generated preview (Android 15+): sample figures in the current colours. See [publishWidgetPreviews]. */
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        val colors = widgetColors(context)
+        // Same Ask button as a placed widget: a mic when a voice model is set up, else the chat icon.
+        val data = sampleData.copy(voice = hasVoice(context))
+        provideContent { GlanceTheme(colors = colors) { Content(context, data) } }
     }
 
     @Composable
@@ -257,10 +274,11 @@ class WeekWidgetReceiver : GlanceAppWidgetReceiver() { override val glanceAppWid
 class TodayWidgetReceiver : GlanceAppWidgetReceiver() { override val glanceAppWidget: GlanceAppWidget = TodayWidget() }
 class SquareWidgetReceiver : GlanceAppWidgetReceiver() { override val glanceAppWidget: GlanceAppWidget = SquareWidget() }
 
-/** Redraws every placed Spendidly widget, e.g. after expenses change. */
+/** Redraws every placed Spendidly widget, e.g. after expenses change, then refreshes the picker previews if they're stale. */
 suspend fun updateWidgets(context: Context) {
     refreshes.update { it + 1 }
     WeekWidget().updateAll(context)
     TodayWidget().updateAll(context)
     SquareWidget().updateAll(context)
+    publishWidgetPreviews(context)
 }

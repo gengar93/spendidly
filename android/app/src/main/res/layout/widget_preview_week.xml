@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview of WeekWidget for Android 12-14 (15+ gets a generated one). Sample figures, as in Widgets.kt. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_preview_bg" android:orientation="vertical" android:padding="18dp">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="bottom" android:orientation="horizontal">
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium" android:maxLines="1" android:text="Spent today"
+                android:textColor="@color/widget_preview_label" android:textSize="13sp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:maxLines="1" android:text="₹640" android:textColor="@color/widget_preview_text"
+                android:textSize="32sp" android:textStyle="bold" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium" android:maxLines="1" android:text="This week ₹2,495"
+                android:textColor="@color/widget_preview_label" android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="56dp"
+            android:gravity="bottom" android:orientation="horizontal">
+            <FrameLayout android:layout_width="12dp" android:layout_height="31dp"
+                android:background="@drawable/widget_preview_bar" android:backgroundTint="@color/widget_preview_bar" />
+            <FrameLayout android:layout_width="12dp" android:layout_height="56dp" android:layout_marginStart="6dp"
+                android:background="@drawable/widget_preview_bar" android:backgroundTint="@color/widget_preview_bar_large" />
+            <FrameLayout android:layout_width="12dp" android:layout_height="13dp" android:layout_marginStart="6dp"
+                android:background="@drawable/widget_preview_bar" android:backgroundTint="@color/widget_preview_bar" />
+            <FrameLayout android:layout_width="12dp" android:layout_height="47dp" android:layout_marginStart="6dp"
+                android:background="@drawable/widget_preview_bar" android:backgroundTint="@color/widget_preview_primary" />
+            <FrameLayout android:layout_width="12dp" android:layout_height="6dp" android:layout_marginStart="6dp"
+                android:background="@drawable/widget_preview_bar" android:backgroundTint="@color/widget_preview_bar" />
+            <FrameLayout android:layout_width="12dp" android:layout_height="6dp" android:layout_marginStart="6dp"
+                android:background="@drawable/widget_preview_bar" android:backgroundTint="@color/widget_preview_bar" />
+            <FrameLayout android:layout_width="12dp" android:layout_height="6dp" android:layout_marginStart="6dp"
+                android:background="@drawable/widget_preview_bar" android:backgroundTint="@color/widget_preview_bar" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <LinearLayout android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1"
+            android:background="@drawable/widget_preview_pill" android:backgroundTint="@color/widget_preview_primary"
+            android:gravity="center" android:orientation="horizontal">
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_w_plus"
+                android:tint="@color/widget_preview_on_primary" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                android:fontFamily="sans-serif-medium" android:maxLines="1" android:text="Add expense"
+                android:textColor="@color/widget_preview_on_primary" android:textSize="15sp" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_height="52dp" android:layout_marginStart="8dp"
+            android:layout_weight="1" android:background="@drawable/widget_preview_pill"
+            android:backgroundTint="@color/widget_preview_tonal" android:gravity="center" android:orientation="horizontal">
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_w_chat"
+                android:tint="@color/widget_preview_on_tonal" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                android:fontFamily="sans-serif-medium" android:maxLines="1" android:text="Ask"
+                android:textColor="@color/widget_preview_on_tonal" android:textSize="15sp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

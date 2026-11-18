@@ -115,6 +115,9 @@ fun SegmentedColumn(modifier: Modifier = Modifier, content: @Composable ColumnSc
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp), content = content)
 }
 
+/** An [ExpenseRow]'s height with its 2dp group gap: 12dp padding either side of the 42dp category tile. */
+val ExpenseRowHeight = 68.dp
+
 @Composable
 fun ExpenseRow(
     item: ExpenseItem, index: Int, count: Int,

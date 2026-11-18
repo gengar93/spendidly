@@ -407,6 +407,7 @@ fun SettingsScreen(state: AppState, contentPadding: PaddingValues) {
         var key by remember { mutableStateOf("") }
         val check = state.keyCheck
         val checking = check is KeyCheckState.Checking
+        val p = LocalPalette.current
         val focus = remember { FocusRequester() }
         LaunchedEffect(Unit) { focus.requestFocus() }
         LaunchedEffect(check) { if (check is KeyCheckState.Valid) key = "" }
@@ -423,10 +424,10 @@ fun SettingsScreen(state: AppState, contentPadding: PaddingValues) {
                 is KeyCheckState.Checking -> "Checking with ${check.provider.label}…" to c.onSurfaceVariant
                 is KeyCheckState.Invalid -> check.message to c.error
                 is KeyCheckState.Valid -> when {
-                    check.hasModels -> "${check.provider.label} key saved."
-                    check.hasVoice -> "${check.provider.label} key saved for voice. It can't use any of Spendidly's chat models."
-                    else -> "${check.provider.label} key saved, but it can't use any of Spendidly's models."
-                } to c.primary
+                    check.hasModels -> "${check.provider.label} key saved." to p.good
+                    check.hasVoice -> "${check.provider.label} key saved for voice. It can't use any of Spendidly's chat models." to p.warn
+                    else -> "${check.provider.label} key saved, but it can't use any of Spendidly's models." to p.warn
+                }
                 KeyCheckState.Idle -> detectProvider(key)?.let { "${it.label} key" to c.onSurfaceVariant }
             }
             status?.let { (text, color) -> Text(text, style = Type.small, color = color) }

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview of SquareWidget for Android 12-14 (15+ gets a generated one). Sample figures, as in Widgets.kt. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_preview_bg" android:orientation="vertical" android:padding="16dp">
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium" android:maxLines="1" android:text="Spent today"
+        android:textColor="@color/widget_preview_label" android:textSize="13sp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:maxLines="1" android:text="₹640" android:textColor="@color/widget_preview_text"
+        android:textSize="30sp" android:textStyle="bold" />
+
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <FrameLayout android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1"
+            android:background="@drawable/widget_preview_pill" android:backgroundTint="@color/widget_preview_primary">
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center"
+                android:src="@drawable/ic_w_plus" android:tint="@color/widget_preview_on_primary" />
+        </FrameLayout>
+        <FrameLayout android:layout_width="0dp" android:layout_height="52dp" android:layout_marginStart="8dp"
+            android:layout_weight="1" android:background="@drawable/widget_preview_pill"
+            android:backgroundTint="@color/widget_preview_tonal">
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center"
+                android:src="@drawable/ic_w_chat" android:tint="@color/widget_preview_on_tonal" />
+        </FrameLayout>
+    </LinearLayout>
+</LinearLayout>

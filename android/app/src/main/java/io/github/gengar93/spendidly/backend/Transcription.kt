@@ -16,13 +16,13 @@ import java.util.UUID
  * in the language spoken, without translation. [hints] are names the speaker may use (categories, recent notes),
  * passed as spelling hints. Blocking; call off the main thread. Throws [BackendProblem] with a short message.
  */
-internal fun transcribe(model: VoiceModel, apiKey: String, audio: File, hints: List<String>): String {
+internal fun transcribe(model: VoiceModel, apiKey: String, audio: File, hints: List<String>, calls: VoiceCalls? = null, allowEmpty: Boolean = false): String {
     val label = model.provider.label
     val text = try {
         when (model.provider) {
-            ModelProvider.OPENAI -> openAiTranscription(model, apiKey, audio, hints)
-            ModelProvider.GOOGLE -> geminiTranscription(model, apiKey, audio, hints)
-            ModelProvider.OPENROUTER -> openRouterTranscription(model, apiKey, audio, hints)
+            ModelProvider.OPENAI -> openAiTranscription(model, apiKey, audio, hints, calls)
+            ModelProvider.GOOGLE -> geminiTranscription(model, apiKey, audio, hints, calls)
+            ModelProvider.OPENROUTER -> openRouterTranscription(model, apiKey, audio, hints, calls)
             ModelProvider.ANTHROPIC -> fail("VOICE_UNAVAILABLE", "Anthropic can't transcribe voice. Pick another voice model in Settings.")
         }
     } catch (_: IOException) {
@@ -30,13 +30,34 @@ internal fun transcribe(model: VoiceModel, apiKey: String, audio: File, hints: L
     } catch (_: JSONException) {
         fail("INVALID_MODEL_REPLY", "$label sent a reply Spendidly couldn't read. Try again.")
     }
-    return text.trim().ifEmpty { fail("EMPTY_TRANSCRIPT", "Spendidly didn't catch any words. Try again.") }
+    return text.trim().ifEmpty { if (allowEmpty) "" else noWords() }
+}
+
+internal fun noWords(): Nothing = fail("EMPTY_TRANSCRIPT", "Spendidly didn't catch any words. Try again.")
+
+/** The requests of one voice question, so a cancel can drop the ones in flight. */
+internal class VoiceCalls {
+    private val open = java.util.concurrent.ConcurrentHashMap.newKeySet<HttpURLConnection>()
+    @Volatile private var cancelled = false
+
+    fun add(connection: HttpURLConnection) {
+        open += connection
+        if (cancelled) { connection.disconnect(); throw java.util.concurrent.CancellationException() }
+    }
+
+    fun remove(connection: HttpURLConnection) { open -= connection }
+
+    fun cancel() {
+        cancelled = true
+        open.forEach { runCatching { it.disconnect() } }
+    }
 }
 
 /** Instruction for models that take audio in a chat-style request. Hints are spelling help only. */
 private fun instruction(hints: List<String>): String {
     val base = "Transcribe the speech in this recording exactly as spoken, in the language spoken. " +
-        "Do not translate, answer, summarise, correct or add anything. Reply with the transcript text only, with no quotes or labels. " +
+        "Do not translate, answer, summarise, correct or add anything. Write numbers and amounts as digits, for example 180, " +
+        "not one hundred eighty. Reply with the transcript text only, with no quotes or labels. " +
         "If there is no speech, reply with nothing."
     if (hints.isEmpty()) return base
     return "$base\nThe speaker may say some of these names from their expense log. When you hear one, spell it this way. " +
@@ -44,7 +65,7 @@ private fun instruction(hints: List<String>): String {
 }
 
 /** OpenAI's dedicated transcription model: multipart upload, names as keywords. */
-private fun openAiTranscription(model: VoiceModel, apiKey: String, audio: File, hints: List<String>): String {
+private fun openAiTranscription(model: VoiceModel, apiKey: String, audio: File, hints: List<String>, calls: VoiceCalls?): String {
     val boundary = "spendidly-" + UUID.randomUUID().toString().replace("-", "")
     val body = ByteArrayOutputStream()
     fun field(name: String, value: String) {
@@ -60,14 +81,14 @@ private fun openAiTranscription(model: VoiceModel, apiKey: String, audio: File, 
     body.write(audio.readBytes())
     body.write("\r\n--$boundary--\r\n".encodeToByteArray())
     val reply = post(
-        model.provider, "https://api.openai.com/v1/audio/transcriptions", body.toByteArray(),
+        calls, model.provider, "https://api.openai.com/v1/audio/transcriptions", body.toByteArray(),
         "multipart/form-data; boundary=$boundary", "Authorization" to "Bearer $apiKey",
     )
     return reply.optString("text")
 }
 
 /** Gemini through its native generateContent, with the clip as inline data. The key goes in a header, never the URL. */
-private fun geminiTranscription(model: VoiceModel, apiKey: String, audio: File, hints: List<String>): String {
+private fun geminiTranscription(model: VoiceModel, apiKey: String, audio: File, hints: List<String>, calls: VoiceCalls?): String {
     val request = json(
         "contents" to JSONArray(listOf(json(
             "role" to "user",
@@ -76,11 +97,12 @@ private fun geminiTranscription(model: VoiceModel, apiKey: String, audio: File, 
                 json("inlineData" to json("mimeType" to "audio/wav", "data" to base64(audio))),
             )),
         ))),
-        // Thinking counts toward maxOutputTokens; a minute of speech needs a few hundred.
+        // Thinking counts toward maxOutputTokens; a minute of speech needs a few hundred. LOW is the lowest level
+        // gemini-3.8-flash accepts (it has no MINIMAL); through OpenRouter it spent no thinking tokens on short clips.
         "generationConfig" to json("maxOutputTokens" to 4000, "thinkingConfig" to json("thinkingLevel" to "LOW")),
     )
     val reply = post(
-        model.provider, "https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent",
+        calls, model.provider, "https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent",
         request.toString().encodeToByteArray(), "application/json", "x-goog-api-key" to apiKey,
     )
     if (reply.optJSONObject("promptFeedback")?.optString("blockReason").let { !it.isNullOrEmpty() && it != "BLOCK_REASON_UNSPECIFIED" }) {
@@ -94,7 +116,7 @@ private fun geminiTranscription(model: VoiceModel, apiKey: String, audio: File, 
 }
 
 /** OpenRouter's chat completions with an input_audio part. WAV is a format every route accepts. */
-private fun openRouterTranscription(model: VoiceModel, apiKey: String, audio: File, hints: List<String>): String {
+private fun openRouterTranscription(model: VoiceModel, apiKey: String, audio: File, hints: List<String>, calls: VoiceCalls?): String {
     val request = json(
         "model" to model.id,
         "messages" to JSONArray(listOf(json(
@@ -107,9 +129,11 @@ private fun openRouterTranscription(model: VoiceModel, apiKey: String, audio: Fi
         "max_tokens" to 4000,
         "stream" to false,
     )
-    // Gemini thinks by default, and thinking counts toward max_tokens.
+    // Transcription needs no reasoning. Gemini 3.8 Flash can't turn it off and "low" is its lowest level ("minimal"
+    // maps to it); thinking counts toward max_tokens. Qwen Omni thinks by default, which more than doubled the wait.
     if (model.id.startsWith("google/")) request.put("reasoning", json("effort" to "low"))
-    val reply = post(model.provider, model.provider.endpoint, request.toString().encodeToByteArray(), "application/json", "Authorization" to "Bearer $apiKey")
+    if (model.id.startsWith("qwen/")) request.put("reasoning", json("effort" to "none"))
+    val reply = post(calls, model.provider, model.provider.endpoint, request.toString().encodeToByteArray(), "application/json", "Authorization" to "Bearer $apiKey")
     if (reply.value("error") != null) fail("PROVIDER_ERROR", "OpenRouter couldn't transcribe this clip. Try again.")
     val choice = reply.getJSONArray("choices").getJSONObject(0)
     if (choice.optString("finish_reason") == "length") fail("MODEL_OUTPUT_LIMIT", "That was too long to transcribe. Try a shorter question.")
@@ -118,8 +142,10 @@ private fun openRouterTranscription(model: VoiceModel, apiKey: String, audio: Fi
 
 private fun base64(file: File): String = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
 
-private fun post(provider: ModelProvider, url: String, body: ByteArray, contentType: String, vararg headers: Pair<String, String>): JSONObject {
+private fun post(calls: VoiceCalls?, provider: ModelProvider, url: String, body: ByteArray, contentType: String, vararg headers: Pair<String, String>): JSONObject {
     val connection = URL(url).openConnection() as HttpURLConnection
+    calls?.add(connection)
+    var read = false
     try {
         connection.requestMethod = "POST"
         connection.instanceFollowRedirects = false
@@ -144,9 +170,12 @@ private fun post(provider: ModelProvider, url: String, body: ByteArray, contentT
                 output.write(buffer, 0, count)
             }
         }
+        read = true
         return JSONObject(output.toByteArray().decodeToString())
     } finally {
-        connection.disconnect()
+        calls?.remove(connection)
+        // A fully read reply leaves the socket in the keep-alive pool, so the next piece skips the TLS handshake.
+        if (!read) connection.disconnect()
     }
 }
 

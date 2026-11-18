@@ -73,23 +73,15 @@ class SpendidlyBackend internal constructor(context: Context) {
 
     private val voiceDir = File(app.cacheDir, "voice")
 
-    /** Starts recording to a fresh file in the cache, first removing any clip a crash left behind. */
-    fun startRecording(): VoiceRecorder {
+    /**
+     * Starts recording a question for [model] to a fresh file in the cache, first removing any clip a crash left behind.
+     * Category names and recent notes go along as spelling hints. The caller must hold RECORD_AUDIO.
+     */
+    fun startVoice(model: VoiceModel): VoiceSession {
         voiceDir.mkdirs()
         voiceDir.listFiles()?.forEach { it.delete() }
-        return VoiceRecorder(File(voiceDir, "voice-${System.currentTimeMillis()}.wav"))
-    }
-
-    /**
-     * Sends a finished recording to [model]'s provider and returns the transcript, with category names and recent
-     * notes as spelling hints. The recording is deleted whatever happens. Throws with a short message on failure.
-     */
-    suspend fun transcribe(model: VoiceModel, audio: File): String = withContext(Dispatchers.IO) {
-        try {
-            val key = providers.credentials(model.provider).apiKey
-            io.github.gengar93.spendidly.backend.transcribe(model, key, audio, voiceHints())
-        } finally {
-            audio.delete()
+        return VoiceSession(model, File(voiceDir, "voice-${System.currentTimeMillis()}.wav")) {
+            providers.credentials(model.provider).apiKey to voiceHints()
         }
     }
 

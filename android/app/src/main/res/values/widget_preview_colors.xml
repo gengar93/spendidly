@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colours for the widgets' static picker previews, matching Glance's Material 3 roles. Only Android 12+ shows
+     previewLayout, where values-v31 and values-night-v31 use the wallpaper colours; these are a fallback. -->
+<resources>
+    <color name="widget_preview_background">#FFDAE2F9</color>
+    <color name="widget_preview_label">#FF44474E</color>
+    <color name="widget_preview_text">#FF191C20</color>
+    <color name="widget_preview_primary">#FF3F5F91</color>
+    <color name="widget_preview_on_primary">#FFFFFFFF</color>
+    <color name="widget_preview_tonal">#FFD6E3FF</color>
+    <color name="widget_preview_on_tonal">#FF001B3E</color>
+    <color name="widget_preview_bar">#FFE0E2EC</color>
+    <color name="widget_preview_bar_large">#FFFCD7FB</color>
+</resources>

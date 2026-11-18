@@ -28,6 +28,7 @@ internal class ProviderClient : ModelClient {
         val body = request.toString().encodeToByteArray()
         if (body.size > 256_000) fail("CONTEXT_LIMIT", "This chat is getting long. Start a new chat.")
         val connection = URL(credentials.provider.endpoint).openConnection() as HttpURLConnection
+        var read = false
         try {
             connection.requestMethod = "POST"
             connection.instanceFollowRedirects = false
@@ -57,13 +58,15 @@ internal class ProviderClient : ModelClient {
                     output.write(buffer, 0, count)
                 }
             }
+            read = true
             return parseModelReply(credentials.provider, JSONObject(output.toByteArray().decodeToString()))
         } catch (_: IOException) {
             fail("PROVIDER_CONNECTION", "Could not reach ${credentials.provider.label}. Check your connection and try again.")
         } catch (_: JSONException) {
             fail("INVALID_MODEL_REPLY", "${credentials.provider.label} returned an unreadable response.")
         } finally {
-            connection.disconnect()
+            // A fully read reply leaves the socket in the keep-alive pool, which saves a TLS handshake on the next turn.
+            if (!read) connection.disconnect()
         }
     }
 }

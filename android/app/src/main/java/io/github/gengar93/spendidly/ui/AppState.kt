@@ -2,6 +2,8 @@ package io.github.gengar93.spendidly.ui
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -20,7 +22,7 @@ import io.github.gengar93.spendidly.backend.ModelProvider
 import io.github.gengar93.spendidly.backend.ProviderConfiguration
 import io.github.gengar93.spendidly.backend.UNSUPPORTED_KEY_MESSAGE
 import io.github.gengar93.spendidly.backend.VoiceModel
-import io.github.gengar93.spendidly.backend.VoiceRecorder
+import io.github.gengar93.spendidly.backend.VoiceSession
 import io.github.gengar93.spendidly.backend.curatedModel
 import io.github.gengar93.spendidly.backend.decimal
 import io.github.gengar93.spendidly.backend.detectProvider
@@ -424,7 +426,9 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         askBusy = true
         scope.launch {
             if (fresh) backend.chats.startNew()
+            val timing = voiceTiming.also { voiceTiming = null }
             val outcome = runCatching { backend.chat.send(provider, text) }.getOrElse { ChatOutcome(failure = io.github.gengar93.spendidly.backend.ChatFailure("FAILED", it.message ?: "The request failed.")) }
+            timing?.let { (at, line) -> Log.d("SpendidlyVoice", "$line, transcript to reply ${SystemClock.elapsedRealtime() - at} ms") }
             apply(entry, outcome)
         }
     }
@@ -472,8 +476,10 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
     /** Set when the open chat should start recording at once (the widget's mic). */
     var voiceRequest by mutableStateOf(false)
     private var voiceChoice by mutableStateOf(backend.voiceChoice)
-    private var recorder: VoiceRecorder? = null
+    private var voice: VoiceSession? = null
     private var voiceJob: Job? = null
+    /** When the last voice question's transcript arrived and how it went, for one timing line once the reply comes. */
+    private var voiceTiming: Pair<Long, String>? = null
 
     /** Voice models the saved keys can use, in order of preference. */
     val voiceOptions: List<VoiceModel>
@@ -505,34 +511,36 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
 
     /** Starts recording. The caller has checked [voiceModel] and the microphone permission. */
     fun startVoice() {
-        if (voiceStage != VoiceStage.Idle || askBusy || voiceModel == null) return
-        val r = try { backend.startRecording() } catch (_: Exception) {
+        val model = voiceModel
+        if (voiceStage != VoiceStage.Idle || askBusy || model == null) return
+        val v = try { backend.startVoice(model) } catch (_: Exception) {
             show("Spendidly couldn't use the microphone. Another app may be using it.")
             return
         }
-        recorder = r
+        voice = v
         voiceMillis = 0; voiceLevel = 0f
         voiceStage = VoiceStage.Recording
         voiceJob = scope.launch {
-            while (voiceStage == VoiceStage.Recording && recorder === r) {
-                voiceMillis = r.millis; voiceLevel = r.level
-                if (r.millis >= VOICE_LIMIT_MS) { stopVoice(); break }
+            while (voiceStage == VoiceStage.Recording && voice === v) {
+                voiceMillis = v.recorder.millis; voiceLevel = v.recorder.level
+                if (v.recorder.millis >= VOICE_LIMIT_MS) { stopVoice(); break }
                 delay(100)
             }
         }
     }
 
-    /** Stops recording, transcribes the clip and sends the transcript as the next question. */
+    /** Stops recording and sends the transcript as the next question. Pieces cut at pauses are already being transcribed. */
     fun stopVoice() {
-        val r = recorder ?: return
-        val model = voiceModel ?: return cancelVoice()
-        recorder = null
+        val v = voice ?: return
+        if (voiceStage != VoiceStage.Recording) return
         voiceJob?.cancel()
         voiceStage = VoiceStage.Transcribing
         voiceJob = scope.launch {
-            // The clip is deleted whatever happens, including a cancel while it's being sent.
-            val audio = withContext(NonCancellable + Dispatchers.IO) { r.stop() }
+            val stopped = SystemClock.elapsedRealtime()
+            // The clip and its pieces are deleted whatever happens, including a cancel while they're being sent.
             try {
+                v.stop()
+                val r = v.recorder
                 val problem = when {
                     r.millis < 600 -> "That was too short. Tap the mic, speak, then tap stop."
                     r.peak < 0.005f -> "Spendidly didn't hear anything. Check the microphone and try again."
@@ -544,7 +552,7 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
                     return@launch
                 }
                 val text = try {
-                    backend.transcribe(model, audio)
+                    v.transcript()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -552,19 +560,22 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
                     show(error.message ?: "Voice didn't work. Try again.")
                     return@launch
                 }
+                val now = SystemClock.elapsedRealtime()
+                voiceTiming = now to "${r.millis} ms clip, ${if (v.whole) "whole clip" else "${r.pieces} pieces"}, stop to transcript ${now - stopped} ms"
                 voiceStage = VoiceStage.Idle
                 ask(text)
             } finally {
-                audio.delete()
+                if (voice === v) { voice = null; voiceStage = VoiceStage.Idle }
+                withContext(NonCancellable + Dispatchers.IO) { v.cancel() }
             }
         }
     }
 
-    /** Drops the recording or transcription in progress; nothing is sent. */
+    /** Drops the recording or transcription in progress, with any requests in flight; nothing is sent. */
     fun cancelVoice() {
         voiceJob?.cancel()
         voiceJob = null
-        recorder?.let { r -> recorder = null; scope.launch(Dispatchers.IO) { r.cancel() } }
+        voice?.let { v -> voice = null; scope.launch(Dispatchers.IO) { v.cancel() } }
         voiceStage = VoiceStage.Idle
     }
 

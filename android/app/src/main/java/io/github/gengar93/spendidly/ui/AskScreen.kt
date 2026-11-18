@@ -58,6 +58,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -340,28 +342,27 @@ private fun Turn(state: AppState, entry: AskEntry) {
                 }
             }
         }
-        if (entry.rows.isNotEmpty()) {
-            val rows = entry.rows.take(12)
-            SegmentedColumn { rows.forEachIndexed { i, item -> ExpenseRow(item, i, rows.size) } }
-        }
-        entry.filters?.takeIf { !entry.pending }?.let { filters ->
-            val filter = remember(filters, state.categories) { state.tableFor(filters) }
-            val found = state.expenses.filter(filter::matches)
-            if (found.isNotEmpty()) Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.secondaryContainer)
-                    .clickable { state.openTable(filter) }.padding(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(c.secondary), contentAlignment = Alignment.Center) {
-                    Icon(Glyph.Table, null, tint = c.onSecondary, modifier = Modifier.size(22.dp))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("Open in table", style = Type.label.copy(fontWeight = FontWeight.SemiBold), color = c.onSecondaryContainer)
-                    Text("${found.size} entr${if (found.size == 1) "y" else "ies"} · ${rupees(found.sumOf { it.amountPaise })}", style = Type.tiny, color = c.onSecondaryContainer.copy(alpha = 0.8f))
-                }
-                Icon(Glyph.Chevron, null, tint = c.onSecondaryContainer, modifier = Modifier.size(20.dp))
+        // Inline rows fill at most ~30% of the screen; the rest are a tap away in the table.
+        val screenHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+        val rows = entry.rows.take((screenHeight * 0.3f / ExpenseRowHeight).toInt().coerceIn(1, 12))
+        val more = entry.rows.size - rows.size
+        if (rows.isNotEmpty()) SegmentedColumn { rows.forEachIndexed { i, item -> ExpenseRow(item, i, rows.size) } }
+        val filter = entry.filters?.takeIf { !entry.pending }?.let { remember(it, state.categories) { state.tableFor(it) } }
+        val found = filter?.let { state.expenses.filter(it::matches) }.orEmpty()
+        if (filter != null && found.isNotEmpty()) Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.secondaryContainer)
+                .clickable { state.openTable(filter) }.padding(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(c.secondary), contentAlignment = Alignment.Center) {
+                Icon(Glyph.Table, null, tint = c.onSecondary, modifier = Modifier.size(22.dp))
             }
-        }
+            Column(Modifier.weight(1f)) {
+                Text(if (more > 0) "+$more more · Open in table" else "Open in table", style = Type.label.copy(fontWeight = FontWeight.SemiBold), color = c.onSecondaryContainer)
+                Text("${found.size} entr${if (found.size == 1) "y" else "ies"} · ${rupees(found.sumOf { it.amountPaise })}", style = Type.tiny, color = c.onSecondaryContainer.copy(alpha = 0.8f))
+            }
+            Icon(Glyph.Chevron, null, tint = c.onSecondaryContainer, modifier = Modifier.size(20.dp))
+        } else if (more > 0) Text("+$more more", style = Type.small, color = c.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp))
     }
     val reply = entry.reply
     if (reporting && reply != null) {
