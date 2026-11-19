@@ -29,7 +29,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ToggleFloatingActionButton
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
@@ -177,13 +189,24 @@ fun ScreenTitle(text: String, trailing: @Composable (() -> Unit)? = null) {
     }
 }
 
-/** Floating toolbar: the current screen's button fills with primary and shows its name. FAB sits apart. */
+/** What the + menu offers, top to bottom. */
+data class DockAction(val label: String, val icon: ImageVector, val onClick: () -> Unit)
+
+/**
+ * Floating toolbar: the current screen's button fills with primary and shows its name. The + sits apart and
+ * expands into [actions]; the caller owns [expanded] so it can draw the scrim and close on Back.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun Dock(current: Screen, onSelect: (Screen) -> Unit, onAdd: () -> Unit, modifier: Modifier = Modifier) {
+fun Dock(
+    current: Screen, onSelect: (Screen) -> Unit, expanded: Boolean, onExpand: (Boolean) -> Unit,
+    actions: List<DockAction>, modifier: Modifier = Modifier,
+) {
     val c = MaterialTheme.colorScheme
-    Row(modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Box(modifier.fillMaxWidth()) {
         Row(
-            Modifier.shadow(8.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(c.surfaceContainerHigh).padding(8.dp),
+            Modifier.align(Alignment.BottomStart).padding(start = 16.dp)
+                .shadow(8.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(c.surfaceContainerHigh).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             for ((screen, icon) in listOf(Screen.Summary to Glyph.Summary, Screen.History to Glyph.History, Screen.Ask to Glyph.Ask)) {
@@ -192,7 +215,7 @@ fun Dock(current: Screen, onSelect: (Screen) -> Unit, onAdd: () -> Unit, modifie
                 val end by animateDpAsState(if (on) 18.dp else 12.dp, bouncy, label = "pad")
                 Row(
                     Modifier.height(48.dp).clip(RoundedCornerShape(50)).background(if (on) c.primary else Color.Transparent)
-                        .clickable(role = SemanticsRole.Tab, onClickLabel = screen.name) { onSelect(screen) }
+                        .clickable(role = SemanticsRole.Tab, onClickLabel = screen.name) { onExpand(false); onSelect(screen) }
                         .padding(start = start, end = end),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -204,14 +227,42 @@ fun Dock(current: Screen, onSelect: (Screen) -> Unit, onAdd: () -> Unit, modifie
                 }
             }
         }
-        Spacer(Modifier.weight(1f))
-        val interaction = remember { MutableInteractionSource() }
-        val r = morphRadius(interaction, 20.dp, 32.dp)
-        Box(
-            Modifier.size(64.dp).shadow(8.dp, RoundedCornerShape(r)).clip(RoundedCornerShape(r)).background(c.primaryContainer)
-                .clickable(interaction, ripple(), onClickLabel = "Add expense", role = SemanticsRole.Button, onClick = onAdd),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Glyph.Add, contentDescription = "Add expense", tint = c.onPrimaryContainer, modifier = Modifier.size(28.dp)) }
+        // The menu pads itself 16dp on each side, which gives the + the toolbar's edge margin.
+        FloatingActionButtonMenu(
+            expanded = expanded,
+            modifier = Modifier.align(Alignment.BottomEnd),
+            button = {
+                ToggleFloatingActionButton(
+                    checked = expanded, onCheckedChange = onExpand,
+                    modifier = Modifier.semantics {
+                        traversalIndex = -1f
+                        contentDescription = "Add or ask"
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    },
+                    containerSize = ToggleFloatingActionButtonDefaults.containerSize(64.dp, 56.dp),
+                    containerCornerRadius = ToggleFloatingActionButtonDefaults.containerCornerRadius(20.dp, 28.dp),
+                ) {
+                    // + turns a quarter-tilt into ✕ as the menu opens.
+                    Icon(
+                        Glyph.Add, contentDescription = null,
+                        tint = androidx.compose.ui.graphics.lerp(c.onPrimaryContainer, c.onPrimary, checkedProgress),
+                        modifier = Modifier.size(28.dp).graphicsLayer { rotationZ = 45f * checkedProgress },
+                    )
+                }
+            },
+        ) {
+            actions.forEachIndexed { i, action ->
+                FloatingActionButtonMenuItem(
+                    onClick = { onExpand(false); action.onClick() },
+                    text = { Text(action.label, style = Type.label.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)) },
+                    icon = { Icon(action.icon, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                    modifier = Modifier.semantics {
+                        isTraversalGroup = true
+                        if (i == actions.lastIndex) customActions = listOf(CustomAccessibilityAction("Close menu") { onExpand(false); true })
+                    },
+                )
+            }
+        }
     }
 }
 

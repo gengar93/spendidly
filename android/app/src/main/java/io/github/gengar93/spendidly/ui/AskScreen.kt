@@ -271,13 +271,7 @@ fun ChatView(state: AppState) {
             ChatInput(state, Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 10.dp), ::mic)
         }
     }
-    if (needsVoiceKey) Sheet("Voice needs a key", onDismiss = { needsVoiceKey = false }) {
-        Text("Voice needs an OpenAI, Google or OpenRouter key. Add one in Settings → API keys.", style = Type.small, color = c.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Open Settings", style = Type.label, color = c.onPrimary, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(c.primary).clickable { needsVoiceKey = false; state.openKeys() }.padding(horizontal = 20.dp, vertical = 11.dp))
-            Text("Not now", style = Type.label, color = c.primary, modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { needsVoiceKey = false }.padding(horizontal = 14.dp, vertical = 11.dp))
-        }
-    }
+    if (needsVoiceKey) VoiceKeySheet(state) { needsVoiceKey = false }
     if (micBlocked) Sheet("Microphone is off", onDismiss = { micBlocked = false }) {
         Text("To ask by voice, allow Microphone for Spendidly in app settings.", style = Type.small, color = c.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -385,6 +379,19 @@ private fun Turn(state: AppState, entry: AskEntry) {
                 }.padding(horizontal = 20.dp, vertical = 11.dp))
                 Text("Cancel", style = Type.label, color = c.primary, modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { reporting = false }.padding(horizontal = 14.dp, vertical = 11.dp))
             }
+        }
+    }
+}
+
+/** Shown when voice is asked for but no saved key offers a voice model. */
+@Composable
+fun VoiceKeySheet(state: AppState, onDismiss: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Sheet("Voice needs a key", onDismiss = onDismiss) {
+        Text("Voice needs an OpenAI, Google or OpenRouter key. Add one in Settings → API keys.", style = Type.small, color = c.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Open Settings", style = Type.label, color = c.onPrimary, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(c.primary).clickable { onDismiss(); state.openKeys() }.padding(horizontal = 20.dp, vertical = 11.dp))
+            Text("Not now", style = Type.label, color = c.primary, modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onDismiss() }.padding(horizontal = 14.dp, vertical = 11.dp))
         }
     }
 }

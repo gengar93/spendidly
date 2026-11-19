@@ -63,6 +63,16 @@ import java.time.ZoneOffset
 
 private enum class Step { Amount, Note, Category }
 
+/** A 48dp round icon button for the sheet's header. */
+@Composable
+private fun SheetIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: androidx.compose.ui.graphics.Color, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick).alpha(if (enabled) 1f else 0.38f),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp)) }
+}
+
 /**
  * Quick add (editing == null) or edit. Docked on the system keyboard:
  * amount → Enter → note → Enter → type to narrow categories → Enter saves the first match.
@@ -136,12 +146,15 @@ fun EntrySheet(state: AppState, editing: ExpenseItem?, onClose: () -> Unit) {
                 }
                 Box(Modifier.weight(1f))
                 if (editing != null) {
-                    Text(
-                        "Delete", style = Type.label, color = p.danger,
-                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { keyboard?.hide(); state.remove(editing.id); onClose() }.padding(8.dp),
-                    )
+                    // Save keeps the current category; Delete shows the Undo toast.
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SheetIcon(Glyph.Check, "Save", p.accent, enabled = paise != null) { save(state.categories.firstOrNull { it.id == current }) }
+                        SheetIcon(Glyph.Close, "Cancel", p.sub) { keyboard?.hide(); onClose() }
+                        SheetIcon(Glyph.Delete, "Delete expense", p.danger) { keyboard?.hide(); state.remove(editing.id); onClose() }
+                    }
+                } else {
+                    Text("Cancel", style = Type.small, color = p.sub, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { onClose() }.padding(8.dp))
                 }
-                Text("Cancel", style = Type.small, color = p.sub, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { onClose() }.padding(8.dp))
             }
 
             // Amount: large while typing it, a compact line afterwards.

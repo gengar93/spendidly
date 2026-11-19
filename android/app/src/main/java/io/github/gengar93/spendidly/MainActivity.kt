@@ -5,6 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -35,6 +38,10 @@ import io.github.gengar93.spendidly.ui.AppState
 import io.github.gengar93.spendidly.ui.AskScreen
 import io.github.gengar93.spendidly.ui.ChatView
 import io.github.gengar93.spendidly.ui.Dock
+import io.github.gengar93.spendidly.ui.DockAction
+import io.github.gengar93.spendidly.ui.Glyph
+import io.github.gengar93.spendidly.ui.VoiceKeySheet
+import io.github.gengar93.spendidly.ui.clickableNoRipple
 import io.github.gengar93.spendidly.ui.EntrySheet
 import io.github.gengar93.spendidly.ui.HistoryScreen
 import io.github.gengar93.spendidly.ui.SpendidlyTheme
@@ -82,13 +89,18 @@ private sealed interface Entry {
 private fun App(state: AppState, open: String?, onOpened: () -> Unit) {
     val p = LocalPalette.current
     var entry by remember { mutableStateOf<Entry?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var needsVoiceKey by remember { mutableStateOf(false) }
+    fun openAdd() { state.closeChat(); entry = Entry.New }
+    fun openChat() { entry = null; state.go(Screen.Ask); state.newChat(focus = true) }
+    fun openVoice() { entry = null; state.go(Screen.Ask); state.newChat(); state.voiceRequest = true }
     LaunchedEffect(open) {
         when (open) {
-            io.github.gengar93.spendidly.widget.OPEN_ADD -> { state.closeChat(); entry = Entry.New }
-            io.github.gengar93.spendidly.widget.OPEN_CHAT -> { entry = null; state.go(Screen.Ask); state.newChat(focus = true) }
-            io.github.gengar93.spendidly.widget.OPEN_VOICE -> { entry = null; state.go(Screen.Ask); state.newChat(); state.voiceRequest = true }
+            io.github.gengar93.spendidly.widget.OPEN_ADD -> openAdd()
+            io.github.gengar93.spendidly.widget.OPEN_CHAT -> openChat()
+            io.github.gengar93.spendidly.widget.OPEN_VOICE -> openVoice()
         }
-        if (open != null) onOpened()
+        if (open != null) { menuOpen = false; onOpened() }
     }
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -96,6 +108,8 @@ private fun App(state: AppState, open: String?, onOpened: () -> Unit) {
     val padding = PaddingValues(start = 16.dp, end = 16.dp, top = top + 4.dp, bottom = nav + 100.dp)
 
     BackHandler(enabled = entry == null && !state.chatOpen && (state.screen == Screen.History || state.screen == Screen.Ask)) { state.go(Screen.Summary) }
+    // Registered after the one above, so Back closes the + menu first.
+    BackHandler(enabled = menuOpen) { menuOpen = false }
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         when (state.screen) {
@@ -104,20 +118,33 @@ private fun App(state: AppState, open: String?, onOpened: () -> Unit) {
             Screen.Ask -> AskScreen(state, padding)
             Screen.Settings -> SettingsScreen(state, padding.let { PaddingValues(start = 16.dp, end = 16.dp, top = top + 4.dp, bottom = nav + 32.dp) })
         }
+        // Keeps scrolled content from running under the status bar.
+        Box(Modifier.fillMaxWidth().height(top).background(p.bg))
+        val showDock = state.screen != Screen.Settings && !(imeVisible && entry == null)
+        LaunchedEffect(showDock) { if (!showDock) menuOpen = false }
+        AnimatedVisibility(menuOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(p.scrim).clickableNoRipple { menuOpen = false })
+        }
         Column(Modifier.align(Alignment.BottomCenter).padding(bottom = if (state.screen == Screen.Settings || imeVisible) nav + 12.dp else 0.dp)) {
             // The open chat shows toasts above its own input.
             if (!state.chatOpen) ToastHost(state.toast, { state.toast = null }, Modifier.padding(bottom = 10.dp))
-            if (state.screen != Screen.Settings && !(imeVisible && entry == null)) {
-                // On Ask the + starts a new chat; everywhere else it adds an expense.
-                Dock(state.screen, { state.go(it) }, { if (state.screen == Screen.Ask) state.newChat() else entry = Entry.New }, Modifier.padding(bottom = nav + 14.dp))
+            if (showDock) {
+                val actions = listOf(
+                    DockAction("Ask by voice", Glyph.Mic) {
+                        // Without a voice model, explain instead of opening a chat. Before keys load, the chat waits for them.
+                        if (state.providerConfigs.isNotEmpty() && state.voiceModel == null) needsVoiceKey = true else openVoice()
+                    },
+                    DockAction("New chat", Glyph.Ask, ::openChat),
+                    DockAction("Add expense", Glyph.Add, ::openAdd),
+                )
+                Dock(state.screen, { state.go(it) }, menuOpen, { menuOpen = it }, actions, Modifier.padding(bottom = nav + 14.dp))
             }
         }
-        // Keeps scrolled content from running under the status bar.
-        Box(Modifier.fillMaxWidth().height(top).background(p.bg))
         if (state.chatOpen) ChatView(state)
         if (state.tableFilter != null) io.github.gengar93.spendidly.ui.ExpenseTable(state) { entry = Entry.Edit(it) }
         entry?.let { current ->
             EntrySheet(state, (current as? Entry.Edit)?.item) { entry = null }
         }
+        if (needsVoiceKey) VoiceKeySheet(state) { needsVoiceKey = false }
     }
 }
