@@ -1,7 +1,12 @@
 package io.github.gengar93.spendidly.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
+import androidx.compose.material3.MotionScheme
+import androidx.compose.ui.MotionDurationScale
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
@@ -55,6 +60,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role as SemanticsRole
 import androidx.compose.ui.text.style.TextOverflow
@@ -169,16 +176,19 @@ fun Hairline(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(LocalPalette.current.line))
 }
 
-/** Round icon button that squares off while pressed. */
+/** Round tonal icon button that squares off while pressed. */
 @Composable
-fun HeaderButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+fun HeaderButton(
+    icon: ImageVector, label: String, modifier: Modifier = Modifier,
+    size: Dp = 44.dp, tint: Color = Color.Unspecified, onClick: () -> Unit,
+) {
     val interaction = remember { MutableInteractionSource() }
-    val r = morphRadius(interaction, 22.dp, 14.dp)
+    val r = morphRadius(interaction, size / 2, 14.dp)
     Box(
-        Modifier.size(44.dp).clip(RoundedCornerShape(r)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        modifier.size(size).clip(RoundedCornerShape(r)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(interaction, ripple(), onClickLabel = label, role = SemanticsRole.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, contentDescription = label, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp)) }
+    ) { Icon(icon, contentDescription = label, tint = tint.takeOrElse { MaterialTheme.colorScheme.onSurface }, modifier = Modifier.size(22.dp)) }
 }
 
 @Composable
@@ -228,7 +238,7 @@ fun Dock(
             }
         }
         // The menu pads itself 16dp on each side, which gives the + the toolbar's edge margin.
-        FloatingActionButtonMenu(
+        MaterialTheme(c, staggeredMenuMotion(actions.size), MaterialTheme.shapes, MaterialTheme.typography) { FloatingActionButtonMenu(
             expanded = expanded,
             modifier = Modifier.align(Alignment.BottomEnd),
             button = {
@@ -252,16 +262,54 @@ fun Dock(
             },
         ) {
             actions.forEachIndexed { i, action ->
+                // Each item also rises and grows from the + on the menu's 40ms beat, nearest first; closing reverses it.
+                val order = actions.lastIndex - i
+                val rise = remember { Animatable(if (expanded) 1f else 0f) }
+                val spring = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+                LaunchedEffect(expanded) {
+                    val wait = MenuStaggerMillis * if (expanded) order else actions.lastIndex - order
+                    // Scaled like every Compose animation, so "Remove animations" (scale 0) shows the items at once.
+                    delay((wait * (coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f)).toLong())
+                    rise.animateTo(if (expanded) 1f else 0f, spring)
+                }
                 FloatingActionButtonMenuItem(
                     onClick = { onExpand(false); action.onClick() },
                     text = { Text(action.label, style = Type.label.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)) },
                     icon = { Icon(action.icon, contentDescription = null, modifier = Modifier.size(22.dp)) },
-                    modifier = Modifier.semantics {
-                        isTraversalGroup = true
-                        if (i == actions.lastIndex) customActions = listOf(CustomAccessibilityAction("Close menu") { onExpand(false); true })
-                    },
+                    // The menu spaces items 4dp apart; 10dp more makes 14dp.
+                    modifier = Modifier.padding(top = if (i > 0) 10.dp else 0.dp)
+                        .graphicsLayer {
+                            val r = rise.value
+                            transformOrigin = TransformOrigin(1f, 1f)
+                            translationY = (1f - r) * 16.dp.toPx()
+                            scaleX = 0.85f + 0.15f * r
+                            scaleY = scaleX
+                        }
+                        .semantics {
+                            isTraversalGroup = true
+                            if (i == actions.lastIndex) customActions = listOf(CustomAccessibilityAction("Close menu") { onExpand(false); true })
+                        },
                 )
             }
+        } }
+    }
+}
+
+/** Gap between + menu items appearing, nearest the + first. */
+private const val MenuStaggerMillis = 40
+
+/**
+ * FloatingActionButtonMenu (Material3 1.5) reveals its items by animating a visible-item count with the theme's
+ * slowEffects spec, a spring that bunches them ~30ms apart. This swaps in a tween that steps one item every
+ * [MenuStaggerMillis], the first at once; everything else keeps the app's expressive scheme.
+ */
+@Composable
+private fun staggeredMenuMotion(count: Int): MotionScheme {
+    val base = MaterialTheme.motionScheme
+    return remember(base, count) {
+        object : MotionScheme by base {
+            override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> =
+                tween(MenuStaggerMillis * (count - 1).coerceAtLeast(0), easing = { f -> if (f <= 0f) 0f else (1 + (count - 1) * f) / count })
         }
     }
 }

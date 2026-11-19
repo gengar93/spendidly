@@ -43,7 +43,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -332,12 +331,15 @@ private fun Turn(state: AppState, entry: AskEntry) {
                 if (change.expenseId == null || change.restore != null || entry.pending) {
                     Text(change.label, style = Type.small, color = c.onPrimaryContainer)
                 } else Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(change.label, style = Type.small, color = c.onPrimaryContainer, modifier = Modifier.weight(1f))
+                    // fill = false: the chip hugs its text like the other chips; a long label still wraps before Undo.
+                    Text(change.label, style = Type.small, color = c.onPrimaryContainer, modifier = Modifier.weight(1f, fill = false))
+                    // Text-height like the other lines. Compose still accepts touches up to a 48dp target around it
+                    // (picking the nearest when two Undos' areas overlap), so the line stays compact.
                     Text(
-                        "Undo", style = Type.label, color = c.primary,
-                        modifier = Modifier.padding(start = 4.dp).minimumInteractiveComponentSize().clip(RoundedCornerShape(10.dp))
+                        "Undo", style = Type.small.copy(fontWeight = FontWeight.SemiBold), color = c.primary,
+                        modifier = Modifier.padding(start = 4.dp).clip(RoundedCornerShape(8.dp))
                             .clickable(role = Role.Button, onClickLabel = "Restore this expense") { state.undoDeletion(entry, change) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 8.dp),
                     )
                 }
             }

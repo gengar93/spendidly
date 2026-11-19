@@ -27,6 +27,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -63,14 +64,21 @@ import java.time.ZoneOffset
 
 private enum class Step { Amount, Note, Category }
 
-/** A 48dp round icon button for the sheet's header. */
+/** The edit sheet's Save: a 40dp primary pill (48dp touch target), greyed while the amount is invalid. */
 @Composable
-private fun SheetIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: androidx.compose.ui.graphics.Color, enabled: Boolean = true, onClick: () -> Unit) {
-    Box(
-        Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick).alpha(if (enabled) 1f else 0.38f),
-        contentAlignment = Alignment.Center,
-    ) { Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp)) }
+private fun SavePill(enabled: Boolean, onClick: () -> Unit) {
+    val c = androidx.compose.material3.MaterialTheme.colorScheme
+    val content = if (enabled) c.onPrimary else c.onSurface.copy(alpha = 0.38f)
+    Row(
+        Modifier.minimumInteractiveComponentSize().height(40.dp).clip(RoundedCornerShape(20.dp))
+            .background(if (enabled) c.primary else c.onSurface.copy(alpha = 0.12f))
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "Save", onClick = onClick)
+            .padding(start = 12.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Glyph.Check, contentDescription = null, tint = content, modifier = Modifier.size(18.dp))
+        Text("Save", style = Type.label, color = content)
+    }
 }
 
 /**
@@ -146,11 +154,14 @@ fun EntrySheet(state: AppState, editing: ExpenseItem?, onClose: () -> Unit) {
                 }
                 Box(Modifier.weight(1f))
                 if (editing != null) {
-                    // Save keeps the current category; Delete shows the Undo toast.
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SheetIcon(Glyph.Check, "Save", p.accent, enabled = paise != null) { save(state.categories.firstOrNull { it.id == current }) }
-                        SheetIcon(Glyph.Close, "Cancel", p.sub) { keyboard?.hide(); onClose() }
-                        SheetIcon(Glyph.Delete, "Delete expense", p.danger) { keyboard?.hide(); state.remove(editing.id); onClose() }
+                    // Save keeps the current category; Delete shows the Undo toast. The circles draw 40dp inside 48dp
+                    // touch targets, so no spacing leaves 8dp between them; the 4dp spacer gives the pill the same gap.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val circle = Modifier.minimumInteractiveComponentSize()
+                        HeaderButton(Glyph.Delete, "Delete expense", circle, size = 40.dp, tint = p.danger) { keyboard?.hide(); state.remove(editing.id); onClose() }
+                        HeaderButton(Glyph.Close, "Cancel", circle, size = 40.dp) { keyboard?.hide(); onClose() }
+                        Box(Modifier.width(4.dp))
+                        SavePill(enabled = paise != null) { save(state.categories.firstOrNull { it.id == current }) }
                     }
                 } else {
                     Text("Cancel", style = Type.small, color = p.sub, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { onClose() }.padding(8.dp))
