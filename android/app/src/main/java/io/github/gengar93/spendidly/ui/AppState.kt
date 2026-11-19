@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
+import java.util.concurrent.atomic.AtomicReference
 import java.time.ZoneId
 
 enum class Screen { Summary, History, Ask, Settings }
@@ -64,6 +65,8 @@ sealed interface KeyCheckState {
 
 class AskEntry(val question: String) {
     var pending by mutableStateOf(true)
+    /** The reply as it streams in, shown while [pending]. Kept afterwards so the view knows the reply streamed. */
+    var streaming by mutableStateOf("")
     var reply by mutableStateOf<String?>(null)
     var failure by mutableStateOf<String?>(null)
     var rows by mutableStateOf<List<ExpenseItem>>(emptyList())
@@ -435,9 +438,23 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         scope.launch {
             if (fresh) backend.chats.startNew()
             val timing = voiceTiming.also { voiceTiming = null }
+            // Text arrives on the turn's thread with every delta; the entry picks up the latest at most every 80 ms.
+            val streamed = AtomicReference("")
+            val ticker = launch {
+                while (true) {
+                    delay(80)
+                    entry.streaming = streamed.get()
+                }
+            }
             val outcome = runCatching {
-                backend.chat.send(provider, text, restored.mapNotNull { it.deleted }) { progress(entry, it, restoredIds) }
+                backend.chat.send(
+                    provider, text, restored.mapNotNull { it.deleted },
+                    onText = streamed::set,
+                    onProgress = { progress(entry, it, restoredIds) },
+                )
             }.getOrElse { ChatOutcome(failure = io.github.gengar93.spendidly.backend.ChatFailure("FAILED", it.message ?: "The request failed.")) }
+            ticker.cancel()
+            entry.streaming = streamed.get()
             timing?.let { (at, line) -> Log.d("SpendidlyVoice", "$line, transcript to reply ${SystemClock.elapsedRealtime() - at} ms") }
             if (outcome.sent) markNoted(restoredIds)
             apply(entry, outcome)

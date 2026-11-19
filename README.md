@@ -47,7 +47,7 @@ The AI features are optional, and Spendidly doesn't include or pay for an AI ser
 
 Spendidly detects the provider from the key and checks it once with that provider. Keys are encrypted with the Android Keystore and never leave the phone except in requests to their own provider. Usage is billed to your account with that provider.
 
-When you ask something, Spendidly sends the provider your question, the chat so far, your category list and the expense records the AI looks up to answer. Voice questions need an OpenAI, Google or OpenRouter key (Gemini or Qwen through OpenRouter). The recording is made only while you're recording, sent with your category names and recent notes as spelling hints, and deleted after transcription. Each provider's own privacy policy applies to what it receives.
+When you ask something, Spendidly sends the provider your question, the chat so far, your category list and the expense records the AI looks up to answer. Voice questions need an OpenAI, Google or OpenRouter key (through OpenRouter: AssemblyAI, GPT Transcribe, Voxtral or Qwen, with Qwen as the fallback when credit runs short). The recording is made only while you're recording, sent with your category names and recent notes as spelling hints, and deleted after transcription. Each provider's own privacy policy applies to what it receives.
 
 ## Building from source
 

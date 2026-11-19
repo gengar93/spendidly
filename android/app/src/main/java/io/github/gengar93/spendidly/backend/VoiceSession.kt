@@ -16,7 +16,7 @@ import java.io.RandomAccessFile
  * One spoken question, always transcribed as one whole clip. When the speaker pauses after some speech, the recording
  * so far is sent to [model]'s provider in the background (a head start). If nothing that may be speech follows before
  * stop, that transcript is used; otherwise, or if it failed, the whole clip is sent after stop. Only one head start is
- * in flight at a time: a later pause replaces it. Audio goes only to that provider; the clip and any head-start copy
+ * in flight at a time: a later pause replaces it. Audio goes only where [transcribe] sends it; the clip and any head-start copy
  * stay in the app's cache and are deleted when the session ends.
  */
 class VoiceSession internal constructor(private val model: VoiceModel, private val file: File, setup: suspend () -> Pair<String, List<String>>) {

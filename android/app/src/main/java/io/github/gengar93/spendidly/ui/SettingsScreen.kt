@@ -193,7 +193,7 @@ fun SettingsScreen(state: AppState, contentPadding: PaddingValues) {
                 }
             }
             Text(
-                "Tap the mic in a chat to ask out loud. The recording goes only to the voice model's provider and is deleted once it's turned into text.",
+                "Tap the mic in a chat to ask out loud. The recording goes only to the voice model's provider (through OpenRouter for an OpenRouter key) and is deleted once it's turned into text.",
                 style = Type.tiny, color = c.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 8.dp),
             )
         }
@@ -352,7 +352,8 @@ fun SettingsScreen(state: AppState, contentPadding: PaddingValues) {
                     }
                 }
             }
-            Text("Only voice models your saved keys can use are listed. Speak in any language; it isn't translated.", style = Type.tiny, color = c.onSurfaceVariant, modifier = Modifier.padding(start = 14.dp, top = 8.dp))
+            val fallback = if (options.any { it.speechOnly }) " If OpenRouter is short of credit for a speech model, Qwen transcribes instead." else ""
+            Text("Only voice models your saved keys can use are listed. Speak in any language; it isn't translated.$fallback", style = Type.tiny, color = c.onSurfaceVariant, modifier = Modifier.padding(start = 14.dp, top = 8.dp))
         }
     }
 

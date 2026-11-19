@@ -66,6 +66,7 @@ class ProviderSettings internal constructor(private val database: LocalDatabase,
             else prefs.edit().putStringSet(modelsPref(provider), models.toSet()).apply()
             if (voice == null) prefs.edit().remove(voicePref(provider)).apply()
             else prefs.edit().putStringSet(voicePref(provider), voice.toSet()).apply()
+            if (provider == ModelProvider.OPENROUTER) prefs.edit().putBoolean(SPEECH_CHECKED, true).apply()
             val usable = usable(provider).map { it.id }
             database.write {
                 val current = rows("SELECT model FROM provider_settings WHERE provider = ?", listOf(provider.name)) { it.getText(0) }.firstOrNull()
@@ -120,11 +121,18 @@ class ProviderSettings internal constructor(private val database: LocalDatabase,
     /** Voice models the saved key can use; as with chat, keys saved before Spendidly checked for them list all. */
     private fun usableVoice(provider: ModelProvider): List<VoiceModel> {
         val allowed = prefs.getStringSet(voicePref(provider), null) ?: return voiceModels(provider)
-        return voiceModels(provider).filter { it.id in allowed }
+        // OpenRouter keys saved before its speech-to-text models were offered were checked against a list without them.
+        val speechUnchecked = provider == ModelProvider.OPENROUTER && !prefs.getBoolean(SPEECH_CHECKED, false)
+        return voiceModels(provider).filter { it.id in allowed || speechUnchecked && it.speechOnly }
     }
 
     private fun modelsPref(provider: ModelProvider) = "models_${provider.name}"
     private fun voicePref(provider: ModelProvider) = "voice_models_${provider.name}"
+
+    private companion object {
+        /** Set once an OpenRouter key's voice models were checked against a list that includes speech-to-text models. */
+        const val SPEECH_CHECKED = "voice_speech_checked_OPENROUTER"
+    }
 }
 
 private class ProviderKeyEncryption {

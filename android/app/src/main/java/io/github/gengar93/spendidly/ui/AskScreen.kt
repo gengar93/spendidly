@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -224,8 +225,11 @@ fun ChatView(state: AppState) {
     }
     BackHandler { state.closeChat() }
     BackHandler(enabled = state.voiceStage != VoiceStage.Idle) { state.cancelVoice() }
-    LaunchedEffect(state.asks.size, state.asks.lastOrNull()?.pending, state.asks.lastOrNull()?.changes?.size) {
-        if (state.asks.isNotEmpty()) list.animateScrollToItem(state.asks.size)
+    val last = state.asks.lastOrNull()
+    LaunchedEffect(state.asks.size, last?.pending, last?.changes?.size, last?.streaming) {
+        if (last == null) return@LaunchedEffect
+        // A streamed reply is followed from its end as it grows, and stays there once it finishes.
+        if (last.streaming.isEmpty()) list.animateScrollToItem(state.asks.size) else list.scrollBy(100_000f)
     }
     Column(Modifier.fillMaxSize().background(c.surface).clickableNoRipple {}.statusBarsPadding().imePadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -305,7 +309,9 @@ private fun Turn(state: AppState, entry: AskEntry) {
                 modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)).background(c.primary).padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
-        if (entry.pending) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (entry.pending && entry.streaming.isNotEmpty()) {
+            MarkdownText(entry.streaming, Modifier.padding(end = 12.dp))
+        } else if (entry.pending) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             LoadingIndicator(Modifier.size(36.dp))
             Text("Working it out", style = Type.small, color = c.onSurfaceVariant)
         } else {

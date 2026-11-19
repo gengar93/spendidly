@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -56,12 +57,15 @@ class ChatSession internal constructor(
 
     /**
      * [restored] are expenses deleted earlier in this chat that the user has since restored with Undo; a note about
-     * each goes before the message. [onProgress] runs after each successful add, update or delete, before the turn continues.
+     * each goes before the message. [onText] gets the reply text so far as it streams in, on the turn's thread; it goes
+     * back to empty when a round turns out to call tools, since only the last round's text is the reply.
+     * [onProgress] runs after each successful add, update or delete, before the turn continues.
      */
     suspend fun send(
         provider: ModelProvider,
         text: String,
         restored: List<JSONObject> = emptyList(),
+        onText: (String) -> Unit = {},
         onProgress: suspend (ChatProgress) -> Unit = {},
     ): ChatOutcome = serialized {
         val input = text.trim()
@@ -83,7 +87,7 @@ class ChatSession internal constructor(
         // Notes go in the user's message rather than a message of their own, so roles still alternate for every provider.
         val notes = restored.joinToString("") { "${restoreNote(it)}\n" }
         val message = if (notes.isEmpty()) input else "$notes\n$input"
-        val turn = Turn(input, (history + ModelMessage.User(message)).toMutableList(), selectedRoute, onProgress)
+        val turn = Turn(input, (history + ModelMessage.User(message)).toMutableList(), selectedRoute, onText, onProgress)
         runTurn(turn, credentials)
     }
 
@@ -134,8 +138,15 @@ class ChatSession internal constructor(
             val batch = turn.batch
             if (batch == null) {
                 val system = chatPrompt(expenses.getCategories(), turn.rounds, turn.searches, clock)
-                val reply = client.reply(credentials, system, tools(), turn.messages)
+                val job = currentCoroutineContext().job
+                val reply = client.reply(credentials, system, tools(), turn.messages) { text ->
+                    // A cancelled or timed-out turn stops reading the stream instead of waiting for its end.
+                    job.ensureActive()
+                    show(turn, text)
+                }
                 currentCoroutineContext().ensureActive()
+                // Text before tool calls isn't the reply; the next round writes that.
+                if (reply.calls.isNotEmpty()) show(turn, "")
                 if (reply.calls.isEmpty()) {
                     if (reply.text.isBlank()) {
                         if (turn.changes.isEmpty()) fail("EMPTY_MODEL_REPLY", "The model returned an empty reply.")
@@ -181,6 +192,18 @@ class ChatSession internal constructor(
                 val canRefineSummary = problem.code != "TOOL_EXECUTION_FAILED" && batch.calls.all { it.name == "summarize_expenses" }
                 if (!canRefineSummary) return stop(turn, problem)
             }
+        }
+    }
+
+    private fun show(turn: Turn, text: String) {
+        if (text == turn.partial) return
+        turn.partial = text
+        try {
+            turn.onText(text)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Showing text early is best effort, like progress.
         }
     }
 
@@ -234,20 +257,22 @@ class ChatSession internal constructor(
         return messages
     }
 
+    /** Text received before a failure stays, as the reply so far, with the failure noted after it. */
     private fun stop(turn: Turn, problem: ChatFailure): ChatOutcome {
+        val partial = turn.partial.takeIf(String::isNotBlank)
         if (turn.rounds > 0) {
-            val messages = closed(turn, turn.batch, problem.message)
+            val messages = closed(turn, turn.batch, if (partial == null) problem.message else "$partial\n\n${problem.message}")
             turn.batch = null
             turn.messages.clear()
             turn.messages.addAll(messages)
             commit(turn)
         }
-        return outcome(turn, failure = problem)
+        return outcome(turn, reply = partial, failure = problem)
     }
 
-    /** Once expenses changed, a later failure is only about the reply; the changes stand. */
+    /** Once expenses changed or the reply began, a later failure is only about the reply; the changes stand. */
     private fun replyFailure(turn: Turn, code: String, message: String) =
-        ChatFailure(code, if (turn.changes.isEmpty()) message else "$UNFINISHED_REPLY $message")
+        ChatFailure(code, if (turn.changes.isEmpty() && turn.partial.isBlank()) message else "$UNFINISHED_REPLY $message")
 
     private fun commit(turn: Turn) {
         history.clear()
@@ -267,8 +292,11 @@ class ChatSession internal constructor(
         val source: String,
         val messages: MutableList<ModelMessage>,
         val route: Pair<ModelProvider, String>,
+        val onText: (String) -> Unit,
         val onProgress: suspend (ChatProgress) -> Unit,
     ) {
+        /** The current round's text so far, as shown. */
+        var partial = ""
         val changes = mutableListOf<ExpenseChange>()
         val tables = mutableListOf<JSONObject>()
         val callIds = mutableSetOf<String>()

@@ -3,7 +3,6 @@ package io.github.gengar93.spendidly.backend
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -19,11 +18,27 @@ internal data class ToolCall(val id: String, val name: String, val arguments: St
 internal data class ToolResult(val id: String, val content: String, val failed: Boolean)
 
 internal fun interface ModelClient {
-    fun reply(credentials: Credentials, system: String, tools: JSONArray, history: List<ModelMessage>): ModelMessage.Assistant
+    /**
+     * Streams one model reply. [onText] gets the reply text so far each time it grows, or a shorter text (possibly
+     * empty) if the provider restarts the reply. The returned message is complete: tool calls are used only once whole.
+     */
+    fun reply(
+        credentials: Credentials,
+        system: String,
+        tools: JSONArray,
+        history: List<ModelMessage>,
+        onText: (String) -> Unit,
+    ): ModelMessage.Assistant
 }
 
 internal class ProviderClient : ModelClient {
-    override fun reply(credentials: Credentials, system: String, tools: JSONArray, history: List<ModelMessage>): ModelMessage.Assistant {
+    override fun reply(
+        credentials: Credentials,
+        system: String,
+        tools: JSONArray,
+        history: List<ModelMessage>,
+        onText: (String) -> Unit,
+    ): ModelMessage.Assistant {
         val request = buildModelRequest(credentials.provider, credentials.model, system, tools, history)
         val body = request.toString().encodeToByteArray()
         if (body.size > 256_000) fail("CONTEXT_LIMIT", "This chat is getting long. Start a new chat.")
@@ -37,6 +52,7 @@ internal class ProviderClient : ModelClient {
             connection.doOutput = true
             connection.useCaches = false
             connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "text/event-stream")
             if (credentials.provider == ModelProvider.ANTHROPIC) {
                 connection.setRequestProperty("x-api-key", credentials.apiKey)
                 connection.setRequestProperty("anthropic-version", "2023-06-01")
@@ -48,18 +64,11 @@ internal class ProviderClient : ModelClient {
             connection.outputStream.use { it.write(body) }
             val status = connection.responseCode
             if (status !in 200..299) providerError(credentials.provider, status)
-            val output = ByteArrayOutputStream()
-            connection.inputStream.use { stream ->
-                val buffer = ByteArray(8192)
-                while (true) {
-                    val count = stream.read(buffer)
-                    if (count < 0) break
-                    if (output.size() + count > 2_000_000) fail("INVALID_MODEL_REPLY", "The provider response was too large.")
-                    output.write(buffer, 0, count)
-                }
-            }
+            val stream = ReplyStream.of(credentials.provider, onText)
+            readEvents(connection.inputStream, stream)
             read = true
-            return parseModelReply(credentials.provider, JSONObject(output.toByteArray().decodeToString()))
+            // The assembled reply has the shape of a non-streamed one, so it is checked and stored the same way.
+            return parseModelReply(credentials.provider, stream.response())
         } catch (_: IOException) {
             fail("PROVIDER_CONNECTION", "Could not reach ${credentials.provider.label}. Check your connection and try again.")
         } catch (_: JSONException) {
@@ -104,7 +113,7 @@ internal fun buildModelRequest(
         val request = json(
             "model" to model.removePrefix("anthropic/").replace(Regex("(?<=\\d)\\.(?=\\d)"), "-"),
             "system" to system, "messages" to JSONArray(messages), "tools" to JSONArray(anthropicTools),
-            "max_tokens" to 3000, "stream" to false,
+            "max_tokens" to 3000, "stream" to true,
         )
         // Sonnet thinks at high effort by default; medium keeps turns quick. A declined turn falls back to another model.
         if (isSonnet(model)) {
@@ -125,7 +134,7 @@ internal fun buildModelRequest(
         }
     }
     val requestTools = if (provider == ModelProvider.GOOGLE) geminiTools(tools) else tools
-    val request = json("model" to model, "messages" to JSONArray(messages), "tools" to requestTools, "tool_choice" to "auto", "stream" to false)
+    val request = json("model" to model, "messages" to JSONArray(messages), "tools" to requestTools, "tool_choice" to "auto", "stream" to true)
     return when (provider) {
         // GPT-6 models take tools over Chat Completions only with reasoning off.
         ModelProvider.OPENAI -> request.put("max_completion_tokens", 3000).put("store", false).put("reasoning_effort", "none")

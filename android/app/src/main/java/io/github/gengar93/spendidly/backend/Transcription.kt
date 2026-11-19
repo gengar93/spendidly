@@ -12,9 +12,10 @@ import java.net.URL
 import java.util.UUID
 
 /**
- * Turns a WAV recording into text with the chosen voice model. The clip goes only to that model's provider,
- * in the language spoken, without translation. [hints] are names the speaker may use (categories, recent notes),
- * passed as spelling hints. Blocking; call off the main thread. Throws [BackendProblem] with a short message.
+ * Turns a WAV recording into text with the chosen voice model. The clip goes only to that model's provider (through
+ * OpenRouter for an OpenRouter key), in the language spoken, without translation. [hints] are names the speaker may use
+ * (categories, recent notes), passed as spelling hints. Blocking; call off the main thread. Throws [BackendProblem]
+ * with a short message.
  */
 internal fun transcribe(model: VoiceModel, apiKey: String, audio: File, hints: List<String>, calls: VoiceCalls? = null, allowEmpty: Boolean = false): String {
     val label = model.provider.label
@@ -22,7 +23,9 @@ internal fun transcribe(model: VoiceModel, apiKey: String, audio: File, hints: L
         when (model.provider) {
             ModelProvider.OPENAI -> openAiTranscription(model, apiKey, audio, hints, calls)
             ModelProvider.GOOGLE -> geminiTranscription(model, apiKey, audio, hints, calls)
-            ModelProvider.OPENROUTER -> openRouterTranscription(model, apiKey, audio, hints, calls)
+            ModelProvider.OPENROUTER ->
+                if (model.speechOnly) openRouterSpeechOrFallback(model, apiKey, audio, hints, calls)
+                else openRouterTranscription(model, apiKey, audio, hints, calls)
             ModelProvider.ANTHROPIC -> fail("VOICE_UNAVAILABLE", "Anthropic can't transcribe voice. Pick another voice model in Settings.")
         }
     } catch (_: IOException) {
@@ -138,10 +141,63 @@ private fun openRouterTranscription(model: VoiceModel, apiKey: String, audio: Fi
     if (model.id.startsWith("google/")) request.put("reasoning", json("effort" to "low"))
     if (model.id.startsWith("qwen/")) request.put("reasoning", json("effort" to "none"))
     val reply = post(calls, model.provider, model.provider.endpoint, request.toString().encodeToByteArray(), "application/json", "Authorization" to "Bearer $apiKey")
-    if (reply.value("error") != null) fail("PROVIDER_ERROR", "OpenRouter couldn't transcribe this clip. Try again.")
+    openRouterReplyError(reply)
     val choice = reply.getJSONArray("choices").getJSONObject(0)
     if (choice.optString("finish_reason") == "length") fail("MODEL_OUTPUT_LIMIT", "That was too long to transcribe. Try a shorter question.")
     return choice.getJSONObject("message").value("content") as? String ?: ""
+}
+
+/**
+ * A speech-only model through OpenRouter. If OpenRouter refuses it for credit, the same clip goes to Qwen Omni through
+ * chat, which costs far less; if that fails too, the message says credit is the problem.
+ */
+private fun openRouterSpeechOrFallback(model: VoiceModel, apiKey: String, audio: File, hints: List<String>, calls: VoiceCalls?): String {
+    try {
+        return openRouterSpeech(model, apiKey, audio, hints, calls)
+    } catch (problem: BackendProblem) {
+        if (problem.code != "PROVIDER_CREDITS") throw problem
+    }
+    val fallback = voiceModels.first { it.provider == ModelProvider.OPENROUTER && !it.speechOnly }
+    fun noCredit(): Nothing = fail("PROVIDER_CREDITS", "Not enough OpenRouter credit to transcribe. Add credit or pick another voice model.")
+    return try {
+        openRouterTranscription(fallback, apiKey, audio, hints, calls)
+    } catch (_: BackendProblem) {
+        noCredit()
+    } catch (_: IOException) {
+        noCredit()
+    } catch (_: JSONException) {
+        noCredit()
+    }
+}
+
+/** OpenRouter's speech-to-text endpoint: the clip as base64 WAV, names as keyterms. */
+private fun openRouterSpeech(model: VoiceModel, apiKey: String, audio: File, hints: List<String>, calls: VoiceCalls?): String {
+    val request = json("model" to model.id, "input_audio" to json("data" to base64(audio), "format" to "wav"))
+    keyterms(hints).takeIf { it.isNotEmpty() }?.let { request.put("keyterms", JSONArray(it)) }
+    val reply = post(
+        calls, model.provider, "https://openrouter.ai/api/v1/audio/transcriptions", request.toString().encodeToByteArray(),
+        "application/json", "Authorization" to "Bearer $apiKey",
+    )
+    openRouterReplyError(reply)
+    return reply.value("text") as? String ?: ""
+}
+
+/**
+ * Hints as keyterms: trimmed, without empties or repeats (ignoring case), at most 1000. As with OpenAI's keywords,
+ * <, > and line breaks (here any control character) are dropped, since one bad term can fail the whole request.
+ */
+private fun keyterms(hints: List<String>): List<String> =
+    hints.map { hint -> hint.filter { it != '<' && it != '>' && !it.isISOControl() }.trim() }
+        .filter(String::isNotEmpty).distinctBy { it.lowercase() }.take(1000)
+
+/** OpenRouter can answer 200 with only an error, when the upstream call fails after it accepted the request. */
+private fun openRouterReplyError(reply: JSONObject) {
+    val error = reply.value("error") ?: return
+    val details = error as? JSONObject
+    if (details?.optInt("code") == 402 || details?.optJSONObject("metadata")?.optString("error_type") == "payment_required") {
+        fail("PROVIDER_CREDITS", "Your OpenRouter account needs credits for voice.")
+    }
+    fail("PROVIDER_ERROR", "OpenRouter couldn't transcribe this clip. Try again.")
 }
 
 private fun base64(file: File): String = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
@@ -199,9 +255,13 @@ private fun voiceError(provider: ModelProvider, status: Int, body: ByteArray?): 
     // Google answers a bad key with 400, as it does a clip it can't read.
     val keyRejected = status == 401 || provider == ModelProvider.GOOGLE && status == 400 &&
         body?.decodeToString()?.let { "API_KEY_INVALID" in it || "API key not valid" in it } == true
+    // OpenRouter answers 402 when credit runs out (also for its in-flight budget), and 403 when a spend limit is used up.
+    val budgetUsed = provider == ModelProvider.OPENROUTER && status == 403 && body != null && runCatching {
+        JSONObject(body.decodeToString()).getJSONObject("error").getJSONObject("metadata").getString("limit_source")
+    }.getOrDefault("") in setOf("openrouter_guardrail_budget", "openrouter_workspace_budget", "openrouter_key_limit")
     when {
         keyRejected -> fail("API_KEY_REJECTED", "$label rejected the API key. Check it in Settings.")
-        status == 402 -> fail("PROVIDER_CREDITS", "Your $label account needs credits for voice.")
+        status == 402 || budgetUsed -> fail("PROVIDER_CREDITS", "Your $label account needs credits for voice.")
         status == 403 -> fail("MODEL_ACCESS_DENIED", "Your $label account can't use this voice model.")
         status == 404 -> fail("MODEL_UNAVAILABLE", "This voice model is unavailable from $label. Pick another in Settings.")
         status == 413 -> fail("VOICE_TOO_LARGE", "That recording was too long for $label.")

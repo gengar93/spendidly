@@ -50,7 +50,7 @@ User messages never contained expense IDs; IDs appeared only in tool arguments a
 
 ## Last comparison (7 Nov 2026, web prompt)
 
-48 cases per model, judged by Claude Sonnet 5.5:
+48 cases per model, judged by Claude Sonnet 5.5. Claude models ran with an Anthropic API key; every other model ran through OpenRouter.
 
 | Model | Passed | Failed cases |
 |---|---|---|

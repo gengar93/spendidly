@@ -55,9 +55,15 @@ class SpendidlyBackend internal constructor(context: Context) {
     /** Tests a pasted key with its provider. The key is not saved; see [ProviderSettings.saveKey]. */
     suspend fun checkKey(key: String): KeyCheck = withContext(Dispatchers.IO) { io.github.gengar93.spendidly.backend.checkKey(key) }
 
-    /** The voice model last picked in Settings, as "PROVIDER:id"; null means the first one a saved key can use. */
+    /**
+     * The voice model last picked in Settings, as "PROVIDER:id"; null means the first one a saved key can use.
+     * A pick of OpenRouter's Gemini, no longer offered, becomes OpenRouter's default voice model.
+     */
     var voiceChoice: String?
-        get() = prefs.getString("voice_model", null)
+        get() = prefs.getString("voice_model", null)?.let { saved ->
+            if (saved != RETIRED_VOICE_CHOICE) saved
+            else voiceModels(ModelProvider.OPENROUTER).first().key.also { voiceChoice = it }
+        }
         set(value) { prefs.edit().putString("voice_model", value).apply() }
 
     /** Voice models the saved keys can use, in [voiceModels] order. */

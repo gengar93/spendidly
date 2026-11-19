@@ -41,8 +41,9 @@ internal fun checkKey(key: String): KeyCheck {
             ModelProvider.OPENROUTER -> {
                 getJson(provider, "https://openrouter.ai/api/v1/key", "Authorization" to "Bearer $clean")
                 // The public list says which models take tools. If it can't be read, the key is still good.
+                // Speech-to-text models are listed only with output_modalities=all.
                 try {
-                    val data = getJson(provider, "https://openrouter.ai/api/v1/models", limit = 16_000_000).getJSONArray("data")
+                    val data = getJson(provider, "https://openrouter.ai/api/v1/models?output_modalities=all", limit = 16_000_000).getJSONArray("data")
                     val all = (0 until data.length()).map { data.getJSONObject(it) }
                     fun JSONObject.lists(path: String, field: String, value: String) =
                         optJSONObject(path)?.optJSONArray(field).let { a -> a != null && (0 until a.length()).any { a.optString(it) == value } }
