@@ -42,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -326,19 +327,18 @@ private fun Turn(state: AppState, entry: AskEntry) {
             entry.failure?.let { Text(it, style = Type.body, color = c.error) }
         }
         if (entry.changes.isNotEmpty()) Column(Modifier.clip(RoundedCornerShape(20.dp)).background(c.primaryContainer).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            entry.changes.forEach { Text(it, style = Type.small, color = c.onPrimaryContainer) }
-        }
-        entry.deletion?.let { (_, expense) ->
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.surfaceContainerLow).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Delete this expense?", style = Type.label.copy(fontWeight = FontWeight.SemiBold), color = c.onSurface)
-                Text(
-                    "${rupees(decimalPaise(expense.optString("amount")) ?: 0)} · ${expense.optString("category_name")} · ${expense.optString("spent_on")}" +
-                        (expense.optString("description").takeIf { it.isNotEmpty() && it != "null" }?.let { "\n$it" } ?: ""),
-                    style = Type.small, color = c.onSurfaceVariant,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Delete", style = Type.label, color = c.onError, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(c.error).clickable { state.resolveDeletion(entry, true) }.padding(horizontal = 18.dp, vertical = 10.dp))
-                    Text("Keep it", style = Type.label, color = c.onSecondaryContainer, modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(c.secondaryContainer).clickable { state.resolveDeletion(entry, false) }.padding(horizontal = 18.dp, vertical = 10.dp))
+            entry.changes.forEach { change ->
+                // Only a finished turn's "Deleted" chips can be undone; the Undo matches History's toast.
+                if (change.expenseId == null || change.restore != null || entry.pending) {
+                    Text(change.label, style = Type.small, color = c.onPrimaryContainer)
+                } else Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(change.label, style = Type.small, color = c.onPrimaryContainer, modifier = Modifier.weight(1f))
+                    Text(
+                        "Undo", style = Type.label, color = c.primary,
+                        modifier = Modifier.padding(start = 4.dp).minimumInteractiveComponentSize().clip(RoundedCornerShape(10.dp))
+                            .clickable(role = Role.Button, onClickLabel = "Restore this expense") { state.undoDeletion(entry, change) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
                 }
             }
         }

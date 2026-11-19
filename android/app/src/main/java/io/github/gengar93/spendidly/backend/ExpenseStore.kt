@@ -94,9 +94,11 @@ class ExpenseStore internal constructor(
             .map { ExpenseItem(it.id, it.amountPaise, LocalDate.parse(it.date), it.categoryId, it.categoryName, it.description) }
     }
 
-    /** Undoes a soft deletion made from the app. */
-    fun restoreExpense(id: String) = database.write {
+    /** Undoes a soft deletion; restoring twice is fine. False when the expense no longer exists, e.g. after erasing everything. */
+    fun restoreExpense(id: String): Boolean = database.write {
+        if (rows("SELECT 1 FROM expenses WHERE id = ?", listOf(id)) { it.getLong(0) }.isEmpty()) return@write false
         execute("UPDATE expenses SET deleted_at = NULL WHERE id = ?", listOf(id))
+        true
     }
 
     /** Removes a category; its expenses become Uncategorized. */
@@ -169,18 +171,11 @@ class ExpenseStore internal constructor(
         }
     }
 
-    internal fun deletionTarget(args: JSONObject): Expense {
+    /** Deletes the expense Ask's model identified. It is a soft delete, so the chat's Undo can restore it. */
+    internal fun deleteChatExpense(args: JSONObject): JSONObject = result {
         args.only(setOf("expense_id"))
         val id = expenseId(args)
-        return database.read { requireExpense(id) }
-    }
-
-    internal fun deleteConfirmed(expense: Expense): JSONObject = result {
-        database.write {
-            val current = requireExpense(expense.id)
-            if (current != expense) fail("EXPENSE_CHANGED", "The expense changed. Review it again before deleting.")
-            softDelete(current)
-        }
+        database.write { softDelete(requireExpense(id)) }
     }
 
     private fun SQLiteConnection.softDelete(expense: Expense): JSONObject {

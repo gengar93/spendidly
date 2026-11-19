@@ -10,11 +10,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.gengar93.spendidly.backend.AppCurrency
 import io.github.gengar93.spendidly.backend.Category
+import io.github.gengar93.spendidly.backend.ChatChange
 import io.github.gengar93.spendidly.backend.ChatOutcome
 import io.github.gengar93.spendidly.backend.ChatProgress
 import io.github.gengar93.spendidly.backend.ChatSummary
 import io.github.gengar93.spendidly.backend.ChatTurn
 import io.github.gengar93.spendidly.backend.CuratedModel
+import io.github.gengar93.spendidly.backend.ExpenseAction
 import io.github.gengar93.spendidly.backend.ExpenseChange
 import io.github.gengar93.spendidly.backend.ExpenseItem
 import io.github.gengar93.spendidly.backend.UNFINISHED_REPLY
@@ -23,6 +25,7 @@ import io.github.gengar93.spendidly.backend.KeyCheck
 import io.github.gengar93.spendidly.backend.SpendidlyBackend
 import io.github.gengar93.spendidly.backend.ModelProvider
 import io.github.gengar93.spendidly.backend.ProviderConfiguration
+import io.github.gengar93.spendidly.backend.Restore
 import io.github.gengar93.spendidly.backend.UNSUPPORTED_KEY_MESSAGE
 import io.github.gengar93.spendidly.backend.VoiceModel
 import io.github.gengar93.spendidly.backend.VoiceSession
@@ -65,8 +68,7 @@ class AskEntry(val question: String) {
     var failure by mutableStateOf<String?>(null)
     var rows by mutableStateOf<List<ExpenseItem>>(emptyList())
     var filters: JSONObject? = null
-    var changes by mutableStateOf<List<String>>(emptyList())
-    var deletion by mutableStateOf<Pair<String, JSONObject>?>(null)
+    var changes by mutableStateOf<List<ChatChange>>(emptyList())
 }
 
 /** Screen state backed by the local backend. All writes go through here so lists stay current. */
@@ -424,58 +426,83 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
             chatId = java.util.UUID.randomUUID().toString()
             chatOpen = true
         }
+        // Restores the model hasn't heard about yet go with this message as notes.
+        val restored = asks.flatMap { it.changes }.filter { it.restore == Restore.RESTORED && !it.noted }
+        val restoredIds = restored.mapNotNull { it.expenseId }.toSet()
         val entry = AskEntry(text)
         asks.add(entry)
         askBusy = true
         scope.launch {
             if (fresh) backend.chats.startNew()
             val timing = voiceTiming.also { voiceTiming = null }
-            val outcome = runCatching { backend.chat.send(provider, text) { progress(entry, it) } }.getOrElse { ChatOutcome(failure = io.github.gengar93.spendidly.backend.ChatFailure("FAILED", it.message ?: "The request failed.")) }
+            val outcome = runCatching {
+                backend.chat.send(provider, text, restored.mapNotNull { it.deleted }) { progress(entry, it, restoredIds) }
+            }.getOrElse { ChatOutcome(failure = io.github.gengar93.spendidly.backend.ChatFailure("FAILED", it.message ?: "The request failed.")) }
             timing?.let { (at, line) -> Log.d("SpendidlyVoice", "$line, transcript to reply ${SystemClock.elapsedRealtime() - at} ms") }
+            if (outcome.sent) markNoted(restoredIds)
             apply(entry, outcome)
         }
     }
 
-    fun resolveDeletion(entry: AskEntry, approved: Boolean) {
-        val (token, _) = entry.deletion ?: return
-        entry.deletion = null
-        entry.pending = true
-        askBusy = true
-        scope.launch { apply(entry, backend.chat.resolveDeletion(token, approved)) }
+    /**
+     * Undo on a "Deleted" chip: restores the expense, after which the chip reads "Restored" (or says the expense no
+     * longer exists) and the next message in this chat tells the model.
+     */
+    fun undoDeletion(entry: AskEntry, change: ChatChange) {
+        val id = change.expenseId ?: return
+        if (entry.pending || change.restore != null) return
+        scope.launch {
+            val restored = withContext(Dispatchers.IO) { backend.expenses.restoreExpense(id) }
+            entry.changes = entry.changes.map { if (it === change) it.copy(restore = if (restored) Restore.RESTORED else Restore.MISSING) else it }
+            val chat = chatId
+            if (chat != null && entry in asks) runCatching { backend.chats.saveTranscript(chat, transcript()) }
+            refresh()
+        }
+    }
+
+    /** Marks restores in [ids] as told to the model, once the message carrying their notes is in the chat's history. */
+    private fun markNoted(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        fun told(it: ChatChange) = it.restore == Restore.RESTORED && !it.noted && it.expenseId in ids
+        asks.forEach { e -> if (e.changes.any(::told)) e.changes = e.changes.map { if (told(it)) it.copy(noted = true) else it } }
+    }
+
+    /** The transcript to save: finished turns, plus a running turn that already changed expenses, marked unfinished. */
+    private fun transcript(): List<ChatTurn> = asks.filter { !it.pending || it.changes.isNotEmpty() }.map {
+        if (it.pending) ChatTurn(it.question, null, UNFINISHED_REPLY, it.changes, null)
+        else ChatTurn(it.question, it.reply, it.failure, it.changes, it.filters)
     }
 
     /**
      * Runs mid-turn after each write: shows the chips under "Working it out" and saves the chat with this turn as
      * unfinished, so it survives the app being killed. The turn waits for this, so it never races the final [apply].
      */
-    private suspend fun progress(entry: AskEntry, progress: ChatProgress): Unit = withContext<Unit>(Dispatchers.Main) {
+    private suspend fun progress(entry: AskEntry, progress: ChatProgress, noted: Set<String>): Unit = withContext<Unit>(Dispatchers.Main) {
         if (!entry.pending) return@withContext
         entry.changes = progress.changes.map(::chip)
         val (items, cats) = withContext(Dispatchers.IO) { backend.expenses.snapshot() to backend.expenses.getCategories() }
         setData(items, cats)
         val id = chatId ?: return@withContext
         if (entry !in asks) return@withContext
-        val turns = asks.filter { it === entry || !it.pending }.map {
-            if (it === entry) ChatTurn(it.question, null, UNFINISHED_REPLY, it.changes, null)
-            else ChatTurn(it.question, it.reply, it.failure, it.changes, it.filters)
-        }
+        // The history saved here already holds this message with its notes.
+        markNoted(noted)
         runCatching {
-            backend.chats.saveProgress(id, turns, progress)
+            backend.chats.saveProgress(id, transcript(), progress)
             chats = backend.chats.list()
         }
     }
 
-    private fun chip(change: ExpenseChange): String {
+    private fun chip(change: ExpenseChange): ChatChange {
         val e = change.expense
         val verb = change.action.name.lowercase().replaceFirstChar { it.uppercase() }
-        return "$verb ${rupees(decimalPaise(e.optString("amount")) ?: 0)} · ${e.optString("category_name")}" +
+        val text = "$verb ${rupees(decimalPaise(e.optString("amount")) ?: 0)} · ${e.optString("category_name")}" +
             (e.optString("description").takeIf { it.isNotEmpty() && it != "null" }?.let { " · $it" } ?: "")
+        return ChatChange(text, deleted = e.takeIf { change.action == ExpenseAction.DELETED })
     }
 
     private suspend fun apply(entry: AskEntry, outcome: ChatOutcome) {
         entry.reply = outcome.reply
         entry.failure = outcome.failure?.message
-        entry.deletion = outcome.deletion?.let { it.token to it.expense }
         // Outcomes carry all of the turn's changes; only a send that failed outright has none, so keep early chips then.
         if (outcome.changes.isNotEmpty() || entry.changes.isEmpty()) entry.changes = outcome.changes.map(::chip)
         if (outcome.changes.isNotEmpty()) {
@@ -488,7 +515,7 @@ class AppState(private val backend: SpendidlyBackend, private val scope: Corouti
         askBusy = false
         chatId?.let { id ->
             runCatching {
-                backend.chats.save(id, asks.filter { !it.pending }.map { ChatTurn(it.question, it.reply, it.failure, it.changes, it.filters) })
+                backend.chats.save(id, transcript())
                 chats = backend.chats.list()
             }
         }

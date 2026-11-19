@@ -19,7 +19,6 @@ enum class ExpenseAction { ADDED, UPDATED, DELETED }
 
 data class ExpenseChange(val action: ExpenseAction, val expense: JSONObject)
 data class ChatFailure(val code: String, val message: String)
-data class DeletionConfirmation(val token: String, val expense: JSONObject)
 
 /** Shown, and kept in the model history, when a turn that already changed expenses ends without a reply. */
 const val UNFINISHED_REPLY = "The reply didn't finish."
@@ -34,13 +33,13 @@ class ChatProgress internal constructor(
     internal val route: Pair<ModelProvider, String>,
 )
 
-/** Changes (one per expense) and tables are cumulative for the current turn, including after a deletion decision. */
+/** Changes (one per expense) and tables are cumulative for the turn. [sent]: the message, with its notes, is in the history. */
 data class ChatOutcome(
     val reply: String? = null,
     val failure: ChatFailure? = null,
     val changes: List<ExpenseChange> = emptyList(),
     val tables: List<JSONObject> = emptyList(),
-    val deletion: DeletionConfirmation? = null,
+    val sent: Boolean = false,
 )
 
 class ChatSession internal constructor(
@@ -54,15 +53,17 @@ class ChatSession internal constructor(
     private val mutex = Mutex()
     private val history = mutableListOf<ModelMessage>()
     private var route: Pair<ModelProvider, String>? = null
-    private var pending: PendingDeletion? = null
 
-    /** [onProgress] runs after each successful add, update or delete, before the turn continues. */
+    /**
+     * [restored] are expenses deleted earlier in this chat that the user has since restored with Undo; a note about
+     * each goes before the message. [onProgress] runs after each successful add, update or delete, before the turn continues.
+     */
     suspend fun send(
         provider: ModelProvider,
         text: String,
+        restored: List<JSONObject> = emptyList(),
         onProgress: suspend (ChatProgress) -> Unit = {},
     ): ChatOutcome = serialized {
-        if (pending != null) return@serialized unsuccessful("CONFIRMATION_PENDING", "Resolve the pending deletion first.")
         val input = text.trim()
         if (input.isEmpty() || input.length > 20_000) {
             return@serialized unsuccessful("INVALID_MESSAGE", "Enter a message of 1–20,000 characters.")
@@ -79,39 +80,10 @@ class ChatSession internal constructor(
         if (route != null && route != selectedRoute) {
             return@serialized unsuccessful("PROVIDER_CHANGED", "Start a new chat to switch providers or models.")
         }
-        val turn = Turn(input, (history + ModelMessage.User(input)).toMutableList(), selectedRoute, onProgress)
-        runTurn(turn, credentials)
-    }
-
-    suspend fun resolveDeletion(token: String, approved: Boolean): ChatOutcome = serialized {
-        val deletion = pending
-        if (deletion == null || deletion.token != token) {
-            return@serialized unsuccessful("NO_PENDING_DELETION", "This deletion request is no longer pending.")
-        }
-        val turn = deletion.turn
-        val batch = checkNotNull(turn.batch)
-        val call = batch.current
-        pending = null
-        if (!approved) {
-            val cancelled = failure("DELETE_CANCELLED", "Deletion canceled.")
-            record(turn, batch, call, cancelled)
-            return@serialized stop(turn, ChatFailure("DELETE_CANCELLED", "Deletion canceled."))
-        }
-        val result = perform { expenses.deleteConfirmed(deletion.expense) }
-        record(turn, batch, call, result)
-        result.problem()?.let { return@serialized stop(turn, it) }
-
-        // The confirmed local write stands even if the provider cannot finish the turn.
-        val credentials = try {
-            settings.credentials(turn.route.first)
-        } catch (error: BackendProblem) {
-            return@serialized stop(turn, ChatFailure(error.code, error.message.orEmpty()))
-        } catch (_: Exception) {
-            return@serialized stop(turn, ChatFailure("SETTINGS_UNAVAILABLE", "Spendidly could not read the provider settings."))
-        }
-        if (credentials.model != turn.route.second) {
-            return@serialized stop(turn, ChatFailure("PROVIDER_CHANGED", "Start a new chat to switch providers or models."))
-        }
+        // Notes go in the user's message rather than a message of their own, so roles still alternate for every provider.
+        val notes = restored.joinToString("") { "${restoreNote(it)}\n" }
+        val message = if (notes.isEmpty()) input else "$notes\n$input"
+        val turn = Turn(input, (history + ModelMessage.User(message)).toMutableList(), selectedRoute, onProgress)
         runTurn(turn, credentials)
     }
 
@@ -135,7 +107,6 @@ class ChatSession internal constructor(
     private fun clear() {
         history.clear()
         route = null
-        pending = null
     }
 
     private suspend fun <T> serialized(block: suspend () -> T): T = withContext(Dispatchers.IO) {
@@ -193,18 +164,6 @@ class ChatSession internal constructor(
             }
             val call = batch.current
             val args = parseArguments(call.arguments)
-            if (call.name == "delete_expense" && args != null) {
-                // The user confirms in chat before the model calls this, so it deletes directly.
-                val result = try {
-                    val target = expenses.deletionTarget(args)
-                    perform { expenses.deleteConfirmed(target) }
-                } catch (error: BackendProblem) {
-                    failure(error.code, error.message.orEmpty())
-                }
-                record(turn, batch, call, result)
-                result.problem()?.let { return stop(turn, it) }
-                continue
-            }
             if (call.name == "find_expenses") turn.searches++
             val result = if (args == null) failure("INVALID_ARGUMENTS", "Tool arguments must be a JSON object.") else perform {
                 when (call.name) {
@@ -213,6 +172,7 @@ class ChatSession internal constructor(
                     "summarize_expenses" -> expenses.summarizeExpenses(args)
                     "find_expenses" -> expenses.findExpenses(args)
                     "update_expense" -> expenses.updateExpense(args)
+                    "delete_expense" -> expenses.deleteChatExpense(args)
                     else -> failure("UNKNOWN_TOOL", "This tool is not available.")
                 }
             }
@@ -293,18 +253,14 @@ class ChatSession internal constructor(
         history.clear()
         history.addAll(turn.messages)
         route = turn.route
+        turn.committed = true
     }
 
-    private fun outcome(
-        turn: Turn,
-        reply: String? = null,
-        failure: ChatFailure? = null,
-        deletion: DeletionConfirmation? = null,
-    ) = ChatOutcome(
+    private fun outcome(turn: Turn, reply: String? = null, failure: ChatFailure? = null) = ChatOutcome(
         reply, failure,
         presented(turn.changes),
         turn.tables.map { JSONObject(it.toString()) },
-        deletion,
+        turn.committed,
     )
 
     private class Turn(
@@ -319,6 +275,7 @@ class ChatSession internal constructor(
         var batch: Batch? = null
         var rounds = 0
         var searches = 0
+        var committed = false
     }
 
     private class Batch(val calls: List<ToolCall>) {
@@ -326,8 +283,6 @@ class ChatSession internal constructor(
         val current: ToolCall get() = calls[results.size]
         val complete: Boolean get() = results.size == calls.size
     }
-
-    private data class PendingDeletion(val token: String, val expense: Expense, val turn: Turn)
 }
 
 /**
@@ -343,6 +298,14 @@ private fun presented(changes: List<ExpenseChange>): List<ExpenseChange> {
         byExpense[key] = ExpenseChange(action, JSONObject(change.expense.toString()))
     }
     return byExpense.values.toList()
+}
+
+/** A short factual note for the model about an expense the user restored after it was deleted in this chat. */
+private fun restoreNote(expense: JSONObject): String {
+    val note = expense.value("description") as? String
+    return "Note: the user restored the expense ${expense.optString("amount")} ${expense.optString("currency")}, " +
+        "${expense.optString("spent_on")}, ${expense.optString("category_name")}, " +
+        "${if (note == null) "no note" else "note ${JSONObject.quote(note)}"}, id ${expense.optString("id")}, that was deleted earlier."
 }
 
 private fun unsuccessful(code: String, message: String) = ChatOutcome(failure = ChatFailure(code, message))

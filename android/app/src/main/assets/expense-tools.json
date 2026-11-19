@@ -397,7 +397,7 @@
     "function": {
       "name": "delete_expense",
       "strict": false,
-      "description": "Delete one active expense by ID, immediately. Call only after the user has explicitly confirmed this exact expense in chat.",
+      "description": "Delete one active expense by ID, immediately. Call once the exact expense the user means is identified; no confirmation is needed. The user can undo it.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,

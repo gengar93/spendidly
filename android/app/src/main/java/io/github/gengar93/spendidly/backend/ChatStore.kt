@@ -16,9 +16,33 @@ data class ChatTurn(
     val question: String,
     val reply: String?,
     val failure: String?,
-    val changes: List<String>,
+    val changes: List<ChatChange>,
     val filters: JSONObject?,
 )
+
+/** What Undo did to a "Deleted" chip: restored the expense, or found it no longer exists. */
+enum class Restore { RESTORED, MISSING }
+
+/**
+ * One expense change as a chip, e.g. "Deleted ₹30 · Food & Snacks · Coffee". [deleted] is the expense a "Deleted" chip
+ * can restore (null for other chips and chats saved before Undo). [noted]: the model has been told about the restore.
+ */
+data class ChatChange(
+    val text: String,
+    val deleted: JSONObject? = null,
+    val restore: Restore? = null,
+    val noted: Boolean = false,
+) {
+    val expenseId: String? get() = deleted?.optString("id")?.ifEmpty { null }
+
+    /** The chip as shown. */
+    val label: String
+        get() = when (restore) {
+            Restore.RESTORED -> "Restored" + text.removePrefix("Deleted")
+            Restore.MISSING -> "Couldn't restore" + text.removePrefix("Deleted") + ". It no longer exists."
+            null -> text
+        }
+}
 
 /** Saved chats: the screen transcript plus the model conversation, so a chat can be continued later. */
 class ChatStore internal constructor(
@@ -33,7 +57,7 @@ class ChatStore internal constructor(
                 val last = if (turns.length() == 0) null else turns.getJSONObject(turns.length() - 1)
                 val preview = last?.let { t ->
                     (t.value("reply") as? String).orEmpty().ifEmpty { (t.value("failure") as? String).orEmpty() }
-                        .ifEmpty { t.optJSONArray("changes")?.optString(0).orEmpty() }
+                        .ifEmpty { t.optJSONArray("changes")?.takeIf { it.length() > 0 }?.let { parseChange(it.get(0)).label }.orEmpty() }
                 }.orEmpty()
                 ChatSummary(row.getText(0), row.getText(1), row.getText(2), io.github.gengar93.spendidly.ui.plainPreview(preview))
             }
@@ -74,6 +98,16 @@ class ChatStore internal constructor(
         write(id, turns, progress.history, progress.route)
     }
 
+    /** Updates only a saved chat's transcript, e.g. after Undo, leaving its model conversation alone, even mid-turn. */
+    suspend fun saveTranscript(id: String, turns: List<ChatTurn>) {
+        if (turns.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            database.write {
+                execute("UPDATE chats SET updated_at = ?, transcript = ? WHERE id = ?", listOf(timestamp(clock), turnsJson(turns).toString(), id))
+            }
+        }
+    }
+
     private suspend fun write(id: String, turns: List<ChatTurn>, history: List<ModelMessage>, route: Pair<ModelProvider, String>?) {
         withContext(Dispatchers.IO) {
             val now = timestamp(clock)
@@ -107,8 +141,22 @@ class ChatStore internal constructor(
 }
 
 private fun turnsJson(turns: List<ChatTurn>) = JSONArray(turns.map {
-    json("question" to it.question, "reply" to it.reply, "failure" to it.failure, "changes" to JSONArray(it.changes), "filters" to it.filters)
+    json("question" to it.question, "reply" to it.reply, "failure" to it.failure, "changes" to JSONArray(it.changes.map(::changeJson)), "filters" to it.filters)
 })
+
+/** Plain chips stay strings, as in chats saved before Undo; "Deleted" chips are objects. */
+private fun changeJson(change: ChatChange): Any = if (change.deleted == null) change.text else json(
+    "text" to change.text, "deleted" to change.deleted, "restore" to change.restore?.name, "noted" to change.noted,
+)
+
+private fun parseChange(value: Any): ChatChange {
+    val o = value as? JSONObject ?: return ChatChange(value.toString())
+    return ChatChange(
+        o.getString("text"), o.optJSONObject("deleted"),
+        (o.value("restore") as? String)?.let { runCatching { Restore.valueOf(it) }.getOrNull() },
+        o.optBoolean("noted"),
+    )
+}
 
 private fun parseTurns(text: String): List<ChatTurn> {
     val array = JSONArray(text)
@@ -117,7 +165,7 @@ private fun parseTurns(text: String): List<ChatTurn> {
         val changes = o.optJSONArray("changes")
         ChatTurn(
             o.getString("question"), o.value("reply") as? String, o.value("failure") as? String,
-            if (changes == null) emptyList() else (0 until changes.length()).map(changes::getString),
+            if (changes == null) emptyList() else (0 until changes.length()).map { parseChange(changes.get(it)) },
             o.optJSONObject("filters"),
         )
     }
